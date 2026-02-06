@@ -7,8 +7,8 @@ import { Rss } from 'lucide-react';
 function LoginPage() {
   const navigate = useNavigate();
   const { login, isLoading, error } = useAuthStore();
-  
-  const [serverUrl, setServerUrl] = useState('http://newton.lan:8001');
+
+  const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 

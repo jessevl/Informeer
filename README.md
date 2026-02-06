@@ -65,14 +65,6 @@ Set `server.proxy['/api'].target` to your Miniflux base URL (without `/v1`).
 
 Informeer uses **HTTP Basic Auth** (username/password) to connect to Miniflux. Credentials are stored in **browser localStorage** for session persistence.
 
-## Environment Variables
-
-No environment variables are required by default. An example file is provided at:
-
-- [.env.example](.env.example)
-
-If you add your own environment files, do **not** commit them.
-
 ## Project Structure
 
 ```

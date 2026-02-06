@@ -23,14 +23,8 @@ RUN if [ -d .git ] && [ ! -f src/frameer/package.json ]; then \
       git submodule update --init --recursive; \
     fi
 
-# Build arguments for environment variables
-ARG VITE_MINIFLUX_URL
-ARG VITE_MINIFLUX_API_KEY
-
 # Build the application
 ENV NODE_OPTIONS="--max-old-space-size=4096"
-ENV VITE_MINIFLUX_URL=${VITE_MINIFLUX_URL}
-ENV VITE_MINIFLUX_API_KEY=${VITE_MINIFLUX_API_KEY}
 RUN npm run build
 
 # Production stage
@@ -42,20 +36,9 @@ COPY nginx.conf /etc/nginx/nginx.conf
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Create entrypoint script that generates runtime config
-RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
-    echo 'echo "window.ENV = {" > /usr/share/nginx/html/config.js' >> /docker-entrypoint.sh && \
-    echo '  echo "  VITE_MINIFLUX_URL: \"${VITE_MINIFLUX_URL:-}\"," >> /usr/share/nginx/html/config.js' >> /docker-entrypoint.sh && \
-    echo '  echo "  VITE_MINIFLUX_API_KEY: \"${VITE_MINIFLUX_API_KEY:-}\"" >> /usr/share/nginx/html/config.js' >> /docker-entrypoint.sh && \
-    echo 'echo "};" >> /usr/share/nginx/html/config.js' >> /docker-entrypoint.sh && \
-    echo 'exec nginx -g "daemon off;"' >> /docker-entrypoint.sh && \
-    chmod +x /docker-entrypoint.sh
-
 # Expose port 80
 EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget -q --spider http://localhost/health || exit 1
-
-CMD ["/docker-entrypoint.sh"]
