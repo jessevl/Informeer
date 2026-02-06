@@ -1,0 +1,41 @@
+{
+  "name": "informeer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.64.2",
+    "@tanstack/react-router": "^1.95.1",
+    "another-react-responsive-masonry": "^0.1.0-alpha.3",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "dexie": "^4.0.10",
+    "dexie-react-hooks": "^1.1.7",
+    "lucide-react": "^0.474.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-player": "^3.4.0",
+    "tailwind-merge": "^3.0.1",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tanstack/router-plugin": "^1.95.1",
+    "@types/node": "^25.1.0",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.23",
+    "eslint": "^9.19.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.0.6",
+    "typescript": "~5.7.3",
+    "vite": "^6.1.0"
+  }
+}

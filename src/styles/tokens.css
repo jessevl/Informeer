@@ -1,0 +1,1179 @@
+/**
+ * Planneer Design Tokens
+ * 
+ * Single source of truth for all theme colors.
+ * 
+ * To create a new theme: duplicate this file and modify the values.
+ * Components use semantic token names (e.g., bg-surface-primary) which
+ * automatically resolve to the correct color for the active theme.
+ * 
+ * Architecture:
+ * 1. Raw color palettes (stone, amber, blue, etc.)
+ * 2. GitHub dark mode palette
+ * 3. Semantic tokens that reference the palettes
+ * 4. Dark mode overrides
+ * 
+ * Inspired by Reeder/Nextflux "Stone" theme for light mode,
+ * GitHub dark theme for dark mode.
+ */
+
+/* =============================================================================
+   RAW COLOR PALETTES
+   These are the base colors used to build semantic tokens.
+   ============================================================================= */
+
+@theme {
+  /* White */
+  --color-white: #ffffff;
+  
+  /* Stone Palette - Warm neutral grays (Tailwind stone) */
+  --color-stone-50: #fafaf9;
+  --color-stone-100: #f5f5f4;
+  --color-stone-200: #e7e5e4;
+  --color-stone-300: #d6d3d1;
+  --color-stone-400: #a8a29e;
+  --color-stone-500: #78716c;
+  --color-stone-600: #57534e;
+  --color-stone-700: #44403d;
+  --color-stone-800: #292524;
+  --color-stone-900: #1c1917;
+  --color-stone-950: #0c0a09;
+  
+  /* Amber Palette - Warm golden accent */
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-amber-800: #92400e;
+  --color-amber-900: #78350f;
+  
+  /* Blue Palette - For info states and dark mode accent */
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-blue-800: #1e40af;
+  --color-blue-900: #1e3a8a;
+  
+  /* Green Palette - Success states */
+  --color-green-50: #f0fdf4;
+  --color-green-100: #dcfce7;
+  --color-green-200: #bbf7d0;
+  --color-green-300: #86efac;
+  --color-green-400: #4ade80;
+  --color-green-500: #22c55e;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-green-800: #166534;
+  --color-green-900: #14532d;
+  
+  /* Red Palette - Danger/error states */
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  --color-red-800: #991b1b;
+  --color-red-900: #7f1d1d;
+  
+  /* Orange Palette - Warning states and P2 priority */
+  --color-orange-50: #fff7ed;
+  --color-orange-100: #ffedd5;
+  --color-orange-200: #fed7aa;
+  --color-orange-300: #fdba74;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-orange-600: #ea580c;
+  --color-orange-700: #c2410c;
+  --color-orange-800: #9a3412;
+  --color-orange-900: #7c2d12;
+
+  /* ==========================================================================
+     GITHUB DARK PALETTE
+     Used as the base for dark mode semantic tokens.
+     ========================================================================== */
+  
+  /* Canvas (backgrounds) */
+  --color-gh-canvas-default: #0d1117;
+  --color-gh-canvas-inset: #010409;
+  --color-gh-canvas-subtle: #161b22;
+  --color-gh-canvas-overlay: #21262d;
+  
+  /* Foreground (text) */
+  --color-gh-fg-default: #e6edf3;
+  --color-gh-fg-muted: #8b949e;
+  --color-gh-fg-subtle: #6e7681;
+  --color-gh-fg-disabled: #484f58;
+  
+  /* Borders */
+  --color-gh-border-default: #30363d;
+  --color-gh-border-muted: #21262d;
+  --color-gh-border-subtle: #161b22;
+  
+  /* Accent (blue) */
+  --color-gh-accent-fg: #58a6ff;
+  --color-gh-accent-emphasis: #1f6feb;
+  --color-gh-accent-muted: rgba(56, 139, 253, 0.15);
+  --color-gh-accent-subtle: rgba(56, 139, 253, 0.1);
+  
+  /* State colors */
+  --color-gh-success-fg: #3fb950;
+  --color-gh-success-muted: rgba(63, 185, 80, 0.15);
+  --color-gh-danger-fg: #f85149;
+  --color-gh-danger-muted: rgba(248, 81, 73, 0.15);
+  --color-gh-warning-fg: #d29922;
+  --color-gh-warning-muted: rgba(210, 153, 34, 0.15);
+
+  /* ==========================================================================
+     SEMANTIC TOKENS - LIGHT MODE (Default)
+     These are the tokens components should use.
+     ========================================================================== */
+  
+  /* ==================== SURFACES (Warm stone hierarchy: lightest → darkest) ==================== 
+     USAGE:
+     - surface-primary: Main content area, paper surface (lightest)
+     - surface-secondary: List panels, subpage areas (subtle gold)
+     - surface-tertiary: Sidebars, side panels, insets (more gold)
+     - surface-app: Behind everything, deepest background
+  */
+  --color-surface-app: #E3E1DC;             /* Deepest background - visible behind sidebar */
+  --color-surface-primary: #FAF9F7;         /* Paper - warm off-white for main content */
+  --color-surface-base: var(--color-surface-primary);
+  --color-surface-secondary: #F5F3EF;       /* List panels, subpages - subtle stone */
+  --color-surface-tertiary: #EBE7E0;        /* Sidebars, side panels - more stone */
+  --color-surface-sidebar: var(--color-surface-tertiary);
+  --color-surface-inset: var(--color-stone-200);  /* Inset areas - matches interactive-bg */
+  --color-surface-hover: #E8E4DD;         /* Warm tan for hover states */
+  --color-surface-active: #DED9D0;        /* Slightly darker for active states */
+  --color-surface-inverse: var(--color-stone-900);
+  --color-surface-inverted: var(--color-stone-900);
+  --color-surface-overlay: rgba(0, 0, 0, 0.4);
+  --color-surface-glass: rgba(250, 249, 247, 0.7); /* Warm glass effect */
+  
+  /* Panel gradient - subtle radial from top center for paper-like depth */
+  --color-panel-gradient: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(255, 250, 230, 0.5) 0%, transparent 60%);
+  
+  /* ==================== TEXT ==================== */
+  --color-text-primary: #42403B;
+  --color-text-secondary: var(--color-stone-600);
+  --color-text-tertiary: var(--color-stone-500);
+  --color-text-disabled: var(--color-stone-400);
+  --color-text-inverse: var(--color-white);
+  --color-text-link: var(--color-amber-700);
+  --color-text-link-hover: var(--color-amber-800);
+  
+  /* ==================== AMBER ACCENTS (Subtle hints & highlights) ==================== */
+  --color-amber-hint: var(--color-amber-100);
+  --color-amber-accent: var(--color-amber-500);
+  --color-amber-border: var(--color-amber-300);
+  --color-amber-glow: rgba(245, 158, 11, 0.15);
+  
+  /* ==================== BORDERS ==================== */
+  --color-border-default: var(--color-stone-300);
+  --color-border-secondary: var(--color-stone-200);
+  --color-border-subtle: var(--color-stone-200);
+  --color-border-emphasis: var(--color-stone-400);
+  --color-border-focus: var(--color-amber-500);
+  --color-border-accent: var(--color-amber-300);
+  
+  /* ==================== ACCENTS (Warm stone theme - Reeder-inspired) ==================== */
+  --color-accent-primary: var(--color-stone-600);
+  --color-accent-hover: var(--color-stone-700);
+  --color-accent-active: var(--color-stone-800);
+  --color-accent-muted: var(--color-stone-200);
+  --color-accent-subtle: var(--color-stone-100);
+  --color-accent-fg: var(--color-stone-700);
+  --color-accent-emphasis: var(--color-stone-400);
+  --color-accent-glow: rgba(120, 113, 108, 0.06);  /* Subtle paper surface glow */
+  
+  /* ==================== INTERACTIVE (Warm stone for selections/active states - Reeder-inspired) ==================== */
+  --color-interactive-bg: var(--color-stone-200);
+  --color-interactive-bg-strong: var(--color-stone-700);
+  --color-interactive-bg-hover: var(--color-stone-300);
+  --color-interactive-text: var(--color-stone-700);
+  --color-interactive-text-strong: var(--color-stone-800);
+  --color-interactive-border: var(--color-stone-400);
+  --color-interactive-ring: var(--color-stone-400);
+  --color-interactive-shadow: rgba(120, 113, 108, 0.15);
+  
+  /* ==================== CONTROLS (Checkboxes, toggles, radio buttons) ==================== */
+  --color-control-checked-bg: var(--color-stone-600);
+  --color-control-checked-border: var(--color-stone-600);
+  --color-control-checked-fg: var(--color-white);
+  --color-control-unchecked-bg: var(--color-surface-primary);
+  --color-control-unchecked-border: var(--color-stone-400);
+  
+  /* ==================== SEMANTIC STATES ==================== */
+  --color-success-fg: var(--color-green-600);
+  --color-success-bg: var(--color-green-50);
+  --color-success-border: var(--color-green-200);
+  --color-success: var(--color-green-600);
+  
+  --color-warning-fg: var(--color-amber-600);
+  --color-warning-bg: var(--color-amber-50);
+  --color-warning-border: var(--color-amber-200);
+  --color-warning: var(--color-amber-500);
+  
+  --color-danger-fg: var(--color-red-600);
+  --color-danger-bg: var(--color-red-50);
+  --color-danger-border: var(--color-red-200);
+  --color-danger: var(--color-red-600);
+  
+  --color-info-fg: var(--color-blue-600);
+  --color-info-bg: var(--color-blue-50);
+  --color-info-border: var(--color-blue-200);
+  --color-info: var(--color-blue-600);
+  
+  /* ==================== TASK PRIORITIES ==================== */
+  --color-priority-1: var(--color-red-500);
+  --color-priority-2: var(--color-orange-500);
+  --color-priority-3: var(--color-blue-500);
+  --color-priority-4: var(--color-stone-400);
+  
+  /* ==================== BUTTONS ==================== */
+  --color-button-primary-bg: var(--color-stone-700);
+  --color-button-primary-bg-hover: var(--color-stone-800);
+  --color-button-primary-text: var(--color-white);
+  --color-button-secondary-bg: var(--color-stone-100);
+  --color-button-secondary-bg-hover: var(--color-stone-200);
+  --color-button-secondary-text: var(--color-stone-900);
+  --color-button-secondary-border: var(--color-stone-300);
+  --color-button-ghost-text: var(--color-stone-700);
+  --color-button-ghost-text-hover: var(--color-stone-900);
+  --color-button-ghost-bg-hover: var(--color-stone-100);
+  
+  /* ==================== INPUTS ==================== */
+  --color-input-bg: var(--color-white);
+  --color-input-border: var(--color-stone-300);
+  --color-input-border-focus: var(--color-stone-500);
+  --color-input-placeholder: var(--color-stone-400);
+  
+  /* ==================== NAVIGATION ==================== */
+  --color-nav-item-text: var(--color-stone-700);
+  --color-nav-item-text-active: var(--color-amber-700);
+  --color-nav-item-bg-hover: var(--color-stone-200);
+  --color-nav-item-bg-active: var(--color-amber-50);
+  --color-nav-item-border-active: var(--color-amber-200);
+  
+  /* ==================== FAB ACCENT (Floating Action Button - Warm amber) ==================== */
+  --color-fab-bg: var(--color-amber-500);
+  --color-fab-bg-hover: var(--color-amber-600);
+  --color-fab-border: rgba(251, 191, 36, 0.4);  /* amber-400/40 */
+  --color-fab-glow: rgba(245, 158, 11, 0.25);   /* amber-500/25 */
+  --color-fab-text: #ffffff;
+}
+
+/* =============================================================================
+   DARK MODE OVERRIDES
+   ============================================================================= */
+
+.dark {
+  /* ==================== SURFACES (Dark hierarchy - Warm stone-tinted) ==================== 
+     USAGE:
+     - surface-primary: Main content area (lightest dark)
+     - surface-secondary: List panels, subpage areas
+     - surface-tertiary: Sidebars, side panels, insets
+     - surface-app: Behind everything, deepest dark
+  */
+  --color-surface-app: #1f1e1d;           /* Deepest background - subtle warm gray */
+  --color-surface-primary: #292726;       /* Main content - subtle warm gray */
+  --color-surface-base: var(--color-surface-primary);
+  --color-surface-secondary: #2f2d2c;     /* List panels - subtle warm */
+  --color-surface-tertiary: #353332;      /* Sidebars - subtle warm */
+  --color-surface-sidebar: var(--color-surface-tertiary);
+  --color-surface-inset: #3d3b39;         /* Inset areas - subtle warm */
+  --color-surface-hover: #454341;         /* Hover state - subtle warm */
+  --color-surface-active: #4e4b49;        /* Active state - subtle warm */
+  --color-surface-inverse: #fafaf9;       /* stone-50 */
+  --color-surface-inverted: #fafaf9;
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(26, 25, 24, 0.6);
+  
+  /* Panel gradient - subtle radial from top center for dark mode */
+  --color-panel-gradient: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(255, 250, 230, 0.04) 0%, transparent 60%);
+  
+  /* ==================== TEXT ==================== */
+  --color-text-primary: #e7e5e4;          /* stone-200 - warm white */
+  --color-text-secondary: #a8a29e;        /* stone-400 - warm muted */
+  --color-text-tertiary: #78716c;         /* stone-500 - subtle */
+  --color-text-disabled: #57534e;         /* stone-600 - disabled */
+  --color-text-inverse: #171412;
+  --color-text-link: #fbbf24;             /* amber-400 - warm accent */
+  --color-text-link-hover: #fcd34d;       /* amber-300 - brighter on hover */
+  
+  /* ==================== AMBER ACCENTS (Subtle hints & highlights) ==================== */
+  --color-amber-hint: rgba(251, 191, 36, 0.1);
+  --color-amber-accent: #f59e0b;
+  --color-amber-border: rgba(251, 191, 36, 0.3);
+  --color-amber-glow: rgba(251, 191, 36, 0.2);
+  
+  /* ==================== BORDERS ==================== */
+  --color-border-default: #585653;        /* Subtle warm border */
+  --color-border-secondary: #454341;      /* Subtle warm border */
+  --color-border-subtle: #454341;
+  --color-border-emphasis: #716f6c;       /* Emphasis - subtle warm */
+  --color-border-focus: #fbbf24;          /* amber-400 focus */
+  --color-border-accent: rgba(251, 191, 36, 0.4);
+  
+  /* ==================== ACCENTS (Warm stone theme - Reeder-inspired) ==================== */
+  --color-accent-primary: #a8a29e;        /* stone-400 */
+  --color-accent-hover: #d6d3d1;          /* stone-300 */
+  --color-accent-active: #e7e5e4;         /* stone-200 */
+  --color-accent-muted: rgba(168, 162, 158, 0.15);
+  --color-accent-subtle: rgba(168, 162, 158, 0.08);
+  --color-accent-fg: #e7e5e4;             /* stone-200 */
+  --color-accent-emphasis: #57534e;       /* stone-600 */
+  --color-accent-glow: rgba(168, 162, 158, 0.10);  /* Paper surface glow - slightly stronger in dark */
+  
+  /* ==================== INTERACTIVE (Subtle warm selections/active states) ==================== */
+  --color-interactive-bg: rgba(180, 180, 180, 0.18);
+  --color-interactive-bg-strong: #938f8b;  /* Subtle warm gray */
+  --color-interactive-bg-hover: rgba(180, 180, 180, 0.28);
+  --color-interactive-text: #c1bebb;       /* Subtle warm */
+  --color-interactive-text-strong: #e7e5e4; /* stone-200 */
+  --color-interactive-border: #615f59;     /* Subtle warm */
+  --color-interactive-ring: #716e6a;       /* Subtle warm ring */
+  --color-interactive-shadow: rgba(168, 162, 158, 0.15);
+  
+  /* ==================== CONTROLS (Checkboxes, toggles, radio buttons) ==================== */
+  --color-control-checked-bg: #938f8b;    /* Subtle warm gray */
+  --color-control-checked-border: #938f8b;
+  --color-control-checked-fg: #292726;
+  --color-control-unchecked-bg: #292726;
+  --color-control-unchecked-border: #615f59;
+  
+  /* ==================== SEMANTIC STATES ==================== */
+  --color-success-fg: var(--color-gh-success-fg);
+  --color-success-bg: rgba(63, 185, 80, 0.15);
+  --color-success-border: rgba(63, 185, 80, 0.4);
+  
+  --color-warning-fg: var(--color-gh-warning-fg);
+  --color-warning-bg: rgba(210, 153, 34, 0.15);
+  --color-warning-border: rgba(210, 153, 34, 0.4);
+  --color-warning: var(--color-gh-attention-fg);
+  
+  --color-danger-fg: var(--color-gh-danger-fg);
+  --color-danger-bg: rgba(248, 81, 73, 0.15);
+  --color-danger-border: rgba(248, 81, 73, 0.4);
+  --color-danger: var(--color-gh-danger-fg);
+  
+  --color-info-fg: var(--color-gh-accent-fg);
+  --color-info-bg: rgba(88, 166, 255, 0.15);
+  --color-info-border: rgba(88, 166, 255, 0.4);
+  --color-info: var(--color-gh-accent-fg);
+  
+  --color-success-fg: var(--color-gh-success-fg);
+  --color-success-bg: rgba(63, 185, 80, 0.15);
+  --color-success-border: rgba(63, 185, 80, 0.4);
+  --color-success: var(--color-gh-success-fg);
+  
+  /* ==================== BUTTONS ==================== */
+  --color-button-primary-bg: #a8a29e;     /* stone-400 - brighter */
+  --color-button-primary-bg-hover: #d6d3d1; /* stone-300 - lighter on hover */
+  --color-button-primary-text: #1f1d1b;
+  --color-button-secondary-bg: #2c2825;
+  --color-button-secondary-bg-hover: #38332f;
+  --color-button-secondary-text: #e7e5e4;
+  --color-button-secondary-border: #44403c;
+  --color-button-ghost-text: #a8a29e;     /* stone-400 */
+  --color-button-ghost-text-hover: #e7e5e4;
+  --color-button-ghost-bg-hover: #2c2825;
+  
+  /* ==================== INPUTS ==================== */
+  --color-input-bg: #1c1917;              /* stone-900 */
+  --color-input-border: #3d3835;
+  --color-input-border-focus: #fbbf24;    /* amber-400 */
+  --color-input-placeholder: #78716c;     /* stone-500 */
+  
+  /* ==================== NAVIGATION ==================== */
+  --color-nav-item-text: #a8a29e;         /* stone-400 */
+  --color-nav-item-text-active: #c2bcb6;  /* neutral light gray */
+  --color-nav-item-bg-hover: #2c2825;
+  --color-nav-item-bg-active: rgba(180, 180, 180, 0.08);
+  --color-nav-item-border-active: #58534e;
+  
+  /* ==================== FAB ACCENT (Warm amber in dark mode) ==================== */
+  --color-fab-bg: rgba(245, 158, 11, 0.85);  /* amber-500/85 - slightly transparent for glass */
+  --color-fab-bg-hover: rgba(217, 119, 6, 0.9);  /* amber-600/90 */
+  --color-fab-border: rgba(251, 191, 36, 0.35);  /* amber-400/35 */
+  --color-fab-glow: rgba(245, 158, 11, 0.3);   /* amber-500/30 */
+  --color-fab-text: #ffffff;
+}
+
+/* =============================================================================
+   COOL LIGHT VARIANT (Blue/Gray accent instead of Warm Stone)
+   ============================================================================= */
+
+.theme-cool {
+  /* Surfaces - cooler white */
+  --color-surface-app: #f0f2f5;
+  --color-surface-primary: #ffffff;
+  --color-surface-base: var(--color-surface-primary);
+  --color-surface-secondary: #f8f9fa;
+  --color-surface-tertiary: #f0f2f5;
+  --color-surface-sidebar: var(--color-surface-tertiary);
+  --color-surface-inset: #e9ecef;
+  --color-surface-hover: #e9ecef;
+  --color-surface-active: #dee2e6;
+  --color-surface-glass: rgba(255, 255, 255, 0.8);
+  
+  /* Panel gradient - subtle blue tint */
+  --color-panel-gradient: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(59, 130, 246, 0.05) 0%, transparent 60%);
+  
+  /* Text - neutral gray */
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #9ca3af;
+  --color-text-link: #2563eb;
+  --color-text-link-hover: #1d4ed8;
+  
+  /* Borders - cool gray */
+  --color-border-default: #d1d5db;
+  --color-border-secondary: #e5e7eb;
+  --color-border-subtle: #e5e7eb;
+  --color-border-emphasis: #9ca3af;
+  --color-border-focus: #3b82f6;
+  --color-border-accent: #93c5fd;
+  
+  /* Accents - blue */
+  --color-accent-primary: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-active: #1d4ed8;
+  --color-accent-muted: #dbeafe;
+  --color-accent-subtle: #eff6ff;
+  --color-accent-fg: #1d4ed8;
+  --color-accent-emphasis: #60a5fa;
+  --color-accent-glow: rgba(59, 130, 246, 0.06);  /* Subtle paper surface glow */
+  
+  /* Interactive - blue tinted */
+  --color-interactive-bg: #e5e7eb;
+  --color-interactive-bg-strong: #3b82f6;
+  --color-interactive-bg-hover: #d1d5db;
+  --color-interactive-text: #374151;
+  --color-interactive-text-strong: #1f2937;
+  --color-interactive-border: #9ca3af;
+  --color-interactive-ring: #3b82f6;
+  --color-interactive-shadow: rgba(59, 130, 246, 0.15);
+  
+  /* Controls */
+  --color-control-checked-bg: #3b82f6;
+  --color-control-checked-border: #3b82f6;
+  --color-control-unchecked-border: #9ca3af;
+  
+  /* Buttons */
+  --color-button-primary-bg: #3b82f6;
+  --color-button-primary-bg-hover: #2563eb;
+  --color-button-secondary-bg: #f3f4f6;
+  --color-button-secondary-bg-hover: #e5e7eb;
+  --color-button-secondary-text: #1f2937;
+  --color-button-secondary-border: #d1d5db;
+  --color-button-ghost-text: #4b5563;
+  --color-button-ghost-text-hover: #1f2937;
+  --color-button-ghost-bg-hover: #f3f4f6;
+  
+  /* Inputs */
+  --color-input-border: #d1d5db;
+  --color-input-border-focus: #3b82f6;
+  --color-input-placeholder: #9ca3af;
+  
+  /* Navigation */
+  --color-nav-item-text: #4b5563;
+  --color-nav-item-text-active: #2563eb;
+  --color-nav-item-bg-hover: #e5e7eb;
+  --color-nav-item-bg-active: #dbeafe;
+  --color-nav-item-border-active: #93c5fd;
+  
+  /* FAB ACCENT (Cool blue) */
+  --color-fab-bg: var(--color-blue-500);
+  --color-fab-bg-hover: var(--color-blue-600);
+  --color-fab-border: rgba(96, 165, 250, 0.4);  /* blue-400/40 */
+  --color-fab-glow: rgba(59, 130, 246, 0.25);   /* blue-500/25 */
+  --color-fab-text: #ffffff;
+}
+
+/* =============================================================================
+   COOL DARK VARIANT (GitHub-style blue/gray)
+   ============================================================================= */
+
+.dark.theme-cool {
+  /* Surfaces - GitHub dark */
+  --color-surface-app: #010409;
+  --color-surface-primary: #0d1117;
+  --color-surface-base: var(--color-surface-primary);
+  --color-surface-secondary: #161b22;
+  --color-surface-tertiary: #21262d;
+  --color-surface-sidebar: var(--color-surface-tertiary);
+  --color-surface-inset: #010409;
+  --color-surface-hover: #30363d;
+  --color-surface-active: #484f58;
+  --color-surface-glass: rgba(13, 17, 23, 0.7);
+  
+  /* Panel gradient - subtle blue */
+  --color-panel-gradient: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(56, 139, 253, 0.08) 0%, transparent 60%);
+  
+  /* Text - GitHub fg */
+  --color-text-primary: #e6edf3;
+  --color-text-secondary: #8b949e;
+  --color-text-tertiary: #6e7681;
+  --color-text-disabled: #484f58;
+  --color-text-inverse: #0d1117;
+  --color-text-link: #58a6ff;
+  --color-text-link-hover: #79c0ff;
+  
+  /* Borders - GitHub */
+  --color-border-default: #30363d;
+  --color-border-secondary: #21262d;
+  --color-border-subtle: #21262d;
+  --color-border-emphasis: #484f58;
+  --color-border-focus: #58a6ff;
+  --color-border-accent: rgba(56, 139, 253, 0.4);
+  
+  /* Accents - blue */
+  --color-accent-primary: #58a6ff;
+  --color-accent-hover: #79c0ff;
+  --color-accent-active: #a5d6ff;
+  --color-accent-muted: rgba(56, 139, 253, 0.15);
+  --color-accent-subtle: rgba(56, 139, 253, 0.1);
+  --color-accent-fg: #58a6ff;
+  --color-accent-emphasis: #1f6feb;
+  --color-accent-glow: rgba(56, 139, 253, 0.10);  /* Paper surface glow - slightly stronger in dark */
+  
+  /* Interactive - blue tinted */
+  --color-interactive-bg: rgba(56, 139, 253, 0.15);
+  --color-interactive-bg-strong: #1f6feb;
+  --color-interactive-bg-hover: rgba(56, 139, 253, 0.25);
+  --color-interactive-text: #8b949e;
+  --color-interactive-text-strong: #e6edf3;
+  --color-interactive-border: #30363d;
+  --color-interactive-ring: #58a6ff;
+  --color-interactive-shadow: rgba(56, 139, 253, 0.15);
+  
+  /* Controls */
+  --color-control-checked-bg: #1f6feb;
+  --color-control-checked-border: #1f6feb;
+  --color-control-checked-fg: #ffffff;
+  --color-control-unchecked-bg: #0d1117;
+  --color-control-unchecked-border: #30363d;
+  
+  /* Buttons */
+  --color-button-primary-bg: #238636;
+  --color-button-primary-bg-hover: #2ea043;
+  --color-button-primary-text: #ffffff;
+  --color-button-secondary-bg: #21262d;
+  --color-button-secondary-bg-hover: #30363d;
+  --color-button-secondary-text: #c9d1d9;
+  --color-button-secondary-border: #30363d;
+  --color-button-ghost-text: #8b949e;
+  --color-button-ghost-text-hover: #e6edf3;
+  --color-button-ghost-bg-hover: #21262d;
+  
+  /* Inputs */
+  --color-input-bg: #0d1117;
+  --color-input-border: #30363d;
+  --color-input-border-focus: #58a6ff;
+  --color-input-placeholder: #6e7681;
+  
+  /* Navigation */
+  --color-nav-item-text: #8b949e;
+  --color-nav-item-text-active: #58a6ff;
+  --color-nav-item-bg-hover: #21262d;
+  --color-nav-item-bg-active: rgba(56, 139, 253, 0.15);
+  --color-nav-item-border-active: #1f6feb;
+  
+  /* FAB ACCENT (Cool blue in dark mode - GitHub style) */
+  --color-fab-bg: rgba(56, 139, 253, 0.85);   /* GitHub blue/85 - glass effect */
+  --color-fab-bg-hover: rgba(31, 111, 235, 0.9);  /* GitHub accent-emphasis/90 */
+  --color-fab-border: rgba(88, 166, 255, 0.35);  /* gh-accent-fg/35 */
+  --color-fab-glow: rgba(56, 139, 253, 0.3);   /* GitHub blue/30 */
+  --color-fab-text: #ffffff;
+}
+
+/* =============================================================================
+   TAURI DESKTOP OVERRIDES
+   Make app background slightly transparent on desktop for system integration
+   Using !important to ensure these always override base theme definitions
+   ============================================================================= */
+
+html.tauri-app {
+  --color-surface-app: rgba(227, 225, 220, 0.75) !important;  /* Warm light - 75% opacity */
+}
+
+html.tauri-app.dark {
+  --color-surface-app: rgba(31, 30, 29, 0.75) !important;     /* Warm dark - 75% opacity */
+}
+
+html.tauri-app.theme-cool {
+  --color-surface-app: rgba(240, 242, 245, 0.75) !important;  /* Cool light - 75% opacity */
+}
+
+html.tauri-app.dark.theme-cool {
+  --color-surface-app: rgba(1, 4, 9, 0.75) !important;        /* Cool dark - 75% opacity */
+}
+
+/* =============================================================================
+   UTILITY CLASSES
+   Semantic utility classes built from tokens.
+   ============================================================================= */
+
+@layer utilities {
+  /* Surface backgrounds */
+  .bg-surface-app { background-color: var(--color-surface-app); }
+  .bg-surface-primary { background-color: var(--color-surface-primary); }
+  .bg-surface-secondary { background-color: var(--color-surface-secondary); }
+  .bg-surface-tertiary { background-color: var(--color-surface-tertiary); }
+  .bg-surface-sidebar { background-color: var(--color-surface-sidebar); }
+  .bg-surface-hover { background-color: var(--color-surface-hover); }
+  .bg-surface-active { background-color: var(--color-surface-active); }
+  .bg-surface-inverse { background-color: var(--color-surface-inverse); }
+  .bg-surface-overlay { background-color: var(--color-surface-overlay); }
+  
+  /* Hover surface backgrounds */
+  .hover\:bg-surface-hover:hover { background-color: var(--color-surface-hover); }
+  .hover\:bg-surface-active:hover { background-color: var(--color-surface-active); }
+  .hover\:bg-surface-secondary:hover { background-color: var(--color-surface-secondary); }
+  
+  /* Text colors */
+  .text-primary { color: var(--color-text-primary); }
+  .text-secondary { color: var(--color-text-secondary); }
+  .text-tertiary { color: var(--color-text-tertiary); }
+  .text-disabled { color: var(--color-text-disabled); }
+  .text-inverse { color: var(--color-text-inverse); }
+  .text-link { color: var(--color-text-link); }
+  
+  /* Hover text colors */
+  .hover\:text-link-hover:hover { color: var(--color-text-link-hover); }
+  .hover\:text-primary:hover { color: var(--color-text-primary); }
+  
+  /* Border colors */
+  .border-default { border-color: var(--color-border-default); }
+  .border-subtle { border-color: var(--color-border-subtle); }
+  .border-emphasis { border-color: var(--color-border-emphasis); }
+  .border-focus { border-color: var(--color-border-focus); }
+  
+  /* Accent colors */
+  .bg-accent-primary { background-color: var(--color-accent-primary); }
+  .bg-accent-muted { background-color: var(--color-accent-muted); }
+  .bg-accent-subtle { background-color: var(--color-accent-subtle); }
+  .text-accent { color: var(--color-accent-primary); }
+  .border-accent { border-color: var(--color-accent-primary); }
+  
+  /* Hover accent */
+  .hover\:bg-accent-hover:hover { background-color: var(--color-accent-hover); }
+  .hover\:text-accent-hover:hover { color: var(--color-accent-hover); }
+  
+  /* State colors - Success */
+  .text-success { color: var(--color-success-fg); }
+  .bg-success { background-color: var(--color-success-bg); }
+  .border-success { border-color: var(--color-success-border); }
+  
+  /* State colors - Warning */
+  .text-warning { color: var(--color-warning-fg); }
+  .bg-warning { background-color: var(--color-warning-bg); }
+  .border-warning { border-color: var(--color-warning-border); }
+  
+  /* State colors - Danger */
+  .text-danger { color: var(--color-danger-fg); }
+  .bg-danger { background-color: var(--color-danger-bg); }
+  .border-danger { border-color: var(--color-danger-border); }
+  
+  /* State colors - Info */
+  .text-info { color: var(--color-info-fg); }
+  .bg-info { background-color: var(--color-info-bg); }
+  .border-info { border-color: var(--color-info-border); }
+  
+  /* Priority colors */
+  .text-priority-1 { color: var(--color-priority-1); }
+  .text-priority-2 { color: var(--color-priority-2); }
+  .text-priority-3 { color: var(--color-priority-3); }
+  .text-priority-4 { color: var(--color-priority-4); }
+  .border-priority-1 { border-color: var(--color-priority-1); }
+  .border-priority-2 { border-color: var(--color-priority-2); }
+  .border-priority-3 { border-color: var(--color-priority-3); }
+  .border-priority-4 { border-color: var(--color-priority-4); }
+  
+  /* Focus ring */
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* =============================================================================
+   ACCENT COLOR OVERRIDES
+   Applied via class on :root to override all accent-related colors globally.
+   This affects: interactive rings, focus borders, control checkboxes, buttons,
+   FAB, nav active states, links, etc.
+   
+   We use combined selectors to ensure these override theme-specific colors
+   in both light and dark modes (including .dark.theme-cool).
+   ============================================================================= */
+
+/* Amber accent */
+.accent-amber,
+.theme-cool.accent-amber,
+.dark.accent-amber,
+.dark.theme-cool.accent-amber {
+  /* Core accent colors */
+  --color-accent-primary: #f59e0b;
+  --color-accent-hover: #d97706;
+  --color-accent-active: #b45309;
+  --color-accent-muted: rgba(245, 158, 11, 0.15);
+  --color-accent-subtle: rgba(245, 158, 11, 0.08);
+  --color-accent-fg: #d97706;
+  --color-accent-emphasis: #fbbf24;
+  --color-accent-glow: rgba(245, 158, 11, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #f59e0b;
+  --color-interactive-ring: #f59e0b;
+  --color-interactive-shadow: rgba(245, 158, 11, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #f59e0b;
+  --color-control-checked-border: #f59e0b;
+  
+  /* Borders */
+  --color-border-focus: #f59e0b;
+  --color-border-accent: #fcd34d;
+  
+  /* Input focus */
+  --color-input-border-focus: #f59e0b;
+  
+  /* Links */
+  --color-text-link: #d97706;
+  --color-text-link-hover: #b45309;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #d97706;
+  --color-nav-item-bg-active: rgba(245, 158, 11, 0.1);
+  --color-nav-item-border-active: #fcd34d;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #f59e0b;
+  --color-button-primary-bg-hover: #d97706;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(245, 158, 11, 0.9);
+  --color-fab-bg-hover: rgba(217, 119, 6, 0.95);
+  --color-fab-border: rgba(251, 191, 36, 0.4);
+  --color-fab-glow: rgba(245, 158, 11, 0.3);
+}
+
+/* Blue accent */
+.accent-blue,
+.theme-cool.accent-blue,
+.dark.accent-blue,
+.dark.theme-cool.accent-blue {
+  /* Core accent colors */
+  --color-accent-primary: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-active: #1d4ed8;
+  --color-accent-muted: rgba(59, 130, 246, 0.15);
+  --color-accent-subtle: rgba(59, 130, 246, 0.08);
+  --color-accent-fg: #2563eb;
+  --color-accent-emphasis: #60a5fa;
+  --color-accent-glow: rgba(59, 130, 246, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #3b82f6;
+  --color-interactive-ring: #3b82f6;
+  --color-interactive-shadow: rgba(59, 130, 246, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #3b82f6;
+  --color-control-checked-border: #3b82f6;
+  
+  /* Borders */
+  --color-border-focus: #3b82f6;
+  --color-border-accent: #93c5fd;
+  
+  /* Input focus */
+  --color-input-border-focus: #3b82f6;
+  
+  /* Links */
+  --color-text-link: #2563eb;
+  --color-text-link-hover: #1d4ed8;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #2563eb;
+  --color-nav-item-bg-active: rgba(59, 130, 246, 0.1);
+  --color-nav-item-border-active: #93c5fd;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #3b82f6;
+  --color-button-primary-bg-hover: #2563eb;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(59, 130, 246, 0.9);
+  --color-fab-bg-hover: rgba(37, 99, 235, 0.95);
+  --color-fab-border: rgba(96, 165, 250, 0.4);
+  --color-fab-glow: rgba(59, 130, 246, 0.3);
+}
+
+/* Green accent */
+.accent-green,
+.theme-cool.accent-green,
+.dark.accent-green,
+.dark.theme-cool.accent-green {
+  /* Core accent colors */
+  --color-accent-primary: #22c55e;
+  --color-accent-hover: #16a34a;
+  --color-accent-active: #15803d;
+  --color-accent-muted: rgba(34, 197, 94, 0.15);
+  --color-accent-subtle: rgba(34, 197, 94, 0.08);
+  --color-accent-fg: #16a34a;
+  --color-accent-emphasis: #4ade80;
+  --color-accent-glow: rgba(34, 197, 94, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #22c55e;
+  --color-interactive-ring: #22c55e;
+  --color-interactive-shadow: rgba(34, 197, 94, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #22c55e;
+  --color-control-checked-border: #22c55e;
+  
+  /* Borders */
+  --color-border-focus: #22c55e;
+  --color-border-accent: #86efac;
+  
+  /* Input focus */
+  --color-input-border-focus: #22c55e;
+  
+  /* Links */
+  --color-text-link: #16a34a;
+  --color-text-link-hover: #15803d;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #16a34a;
+  --color-nav-item-bg-active: rgba(34, 197, 94, 0.1);
+  --color-nav-item-border-active: #86efac;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #22c55e;
+  --color-button-primary-bg-hover: #16a34a;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(34, 197, 94, 0.9);
+  --color-fab-bg-hover: rgba(22, 163, 74, 0.95);
+  --color-fab-border: rgba(74, 222, 128, 0.4);
+  --color-fab-glow: rgba(34, 197, 94, 0.3);
+}
+
+/* Red accent */
+.accent-red,
+.theme-cool.accent-red,
+.dark.accent-red,
+.dark.theme-cool.accent-red {
+  /* Core accent colors */
+  --color-accent-primary: #ef4444;
+  --color-accent-hover: #dc2626;
+  --color-accent-active: #b91c1c;
+  --color-accent-muted: rgba(239, 68, 68, 0.15);
+  --color-accent-subtle: rgba(239, 68, 68, 0.08);
+  --color-accent-fg: #dc2626;
+  --color-accent-emphasis: #f87171;
+  --color-accent-glow: rgba(239, 68, 68, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #ef4444;
+  --color-interactive-ring: #ef4444;
+  --color-interactive-shadow: rgba(239, 68, 68, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #ef4444;
+  --color-control-checked-border: #ef4444;
+  
+  /* Borders */
+  --color-border-focus: #ef4444;
+  --color-border-accent: #fca5a5;
+  
+  /* Input focus */
+  --color-input-border-focus: #ef4444;
+  
+  /* Links */
+  --color-text-link: #dc2626;
+  --color-text-link-hover: #b91c1c;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #dc2626;
+  --color-nav-item-bg-active: rgba(239, 68, 68, 0.1);
+  --color-nav-item-border-active: #fca5a5;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #ef4444;
+  --color-button-primary-bg-hover: #dc2626;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(239, 68, 68, 0.9);
+  --color-fab-bg-hover: rgba(220, 38, 38, 0.95);
+  --color-fab-border: rgba(248, 113, 113, 0.4);
+  --color-fab-glow: rgba(239, 68, 68, 0.3);
+}
+
+/* Purple accent */
+.accent-purple,
+.theme-cool.accent-purple,
+.dark.accent-purple,
+.dark.theme-cool.accent-purple {
+  /* Core accent colors */
+  --color-accent-primary: #a855f7;
+  --color-accent-hover: #9333ea;
+  --color-accent-active: #7e22ce;
+  --color-accent-muted: rgba(168, 85, 247, 0.15);
+  --color-accent-subtle: rgba(168, 85, 247, 0.08);
+  --color-accent-fg: #9333ea;
+  --color-accent-emphasis: #c084fc;
+  --color-accent-glow: rgba(168, 85, 247, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #a855f7;
+  --color-interactive-ring: #a855f7;
+  --color-interactive-shadow: rgba(168, 85, 247, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #a855f7;
+  --color-control-checked-border: #a855f7;
+  
+  /* Borders */
+  --color-border-focus: #a855f7;
+  --color-border-accent: #d8b4fe;
+  
+  /* Input focus */
+  --color-input-border-focus: #a855f7;
+  
+  /* Links */
+  --color-text-link: #9333ea;
+  --color-text-link-hover: #7e22ce;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #9333ea;
+  --color-nav-item-bg-active: rgba(168, 85, 247, 0.1);
+  --color-nav-item-border-active: #d8b4fe;
+  
+  /* FAB */
+  --color-fab-bg: rgba(168, 85, 247, 0.9);
+  --color-fab-bg-hover: rgba(147, 51, 234, 0.95);
+  --color-fab-border: rgba(192, 132, 252, 0.4);
+  --color-fab-glow: rgba(168, 85, 247, 0.3);
+}
+
+/* Pink accent */
+.accent-pink,
+.theme-cool.accent-pink,
+.dark.accent-pink,
+.dark.theme-cool.accent-pink {
+  /* Core accent colors */
+  --color-accent-primary: #ec4899;
+  --color-accent-hover: #db2777;
+  --color-accent-active: #be185d;
+  --color-accent-muted: rgba(236, 72, 153, 0.15);
+  --color-accent-subtle: rgba(236, 72, 153, 0.08);
+  --color-accent-fg: #db2777;
+  --color-accent-emphasis: #f472b6;
+  --color-accent-glow: rgba(236, 72, 153, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #ec4899;
+  --color-interactive-ring: #ec4899;
+  --color-interactive-shadow: rgba(236, 72, 153, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #ec4899;
+  --color-control-checked-border: #ec4899;
+  
+  /* Borders */
+  --color-border-focus: #ec4899;
+  --color-border-accent: #f9a8d4;
+  
+  /* Input focus */
+  --color-input-border-focus: #ec4899;
+  
+  /* Links */
+  --color-text-link: #db2777;
+  --color-text-link-hover: #be185d;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #db2777;
+  --color-nav-item-bg-active: rgba(236, 72, 153, 0.1);
+  --color-nav-item-border-active: #f9a8d4;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #ec4899;
+  --color-button-primary-bg-hover: #db2777;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(236, 72, 153, 0.9);
+  --color-fab-bg-hover: rgba(219, 39, 119, 0.95);
+  --color-fab-border: rgba(244, 114, 182, 0.4);
+  --color-fab-glow: rgba(236, 72, 153, 0.3);
+}
+
+/* Teal accent */
+.accent-teal,
+.theme-cool.accent-teal,
+.dark.accent-teal,
+.dark.theme-cool.accent-teal {
+  /* Core accent colors */
+  --color-accent-primary: #14b8a6;
+  --color-accent-hover: #0d9488;
+  --color-accent-active: #0f766e;
+  --color-accent-muted: rgba(20, 184, 166, 0.15);
+  --color-accent-subtle: rgba(20, 184, 166, 0.08);
+  --color-accent-fg: #0d9488;
+  --color-accent-emphasis: #2dd4bf;
+  --color-accent-glow: rgba(20, 184, 166, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #14b8a6;
+  --color-interactive-ring: #14b8a6;
+  --color-interactive-shadow: rgba(20, 184, 166, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #14b8a6;
+  --color-control-checked-border: #14b8a6;
+  
+  /* Borders */
+  --color-border-focus: #14b8a6;
+  --color-border-accent: #5eead4;
+  
+  /* Input focus */
+  --color-input-border-focus: #14b8a6;
+  
+  /* Links */
+  --color-text-link: #0d9488;
+  --color-text-link-hover: #0f766e;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #0d9488;
+  --color-nav-item-bg-active: rgba(20, 184, 166, 0.1);
+  --color-nav-item-border-active: #5eead4;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #14b8a6;
+  --color-button-primary-bg-hover: #0d9488;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(20, 184, 166, 0.9);
+  --color-fab-bg-hover: rgba(13, 148, 136, 0.95);
+  --color-fab-border: rgba(45, 212, 191, 0.4);
+  --color-fab-glow: rgba(20, 184, 166, 0.3);
+}
+
+/* Stone accent - Light mode */
+.accent-stone,
+.theme-cool.accent-stone {
+  /* Core accent colors */
+  --color-accent-primary: #78716c;
+  --color-accent-hover: #57534e;
+  --color-accent-active: #44403c;
+  --color-accent-muted: rgba(120, 113, 108, 0.15);
+  --color-accent-subtle: rgba(120, 113, 108, 0.08);
+  --color-accent-fg: #57534e;
+  --color-accent-emphasis: #a8a29e;
+  --color-accent-glow: rgba(120, 113, 108, 0.08);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #78716c;
+  --color-interactive-ring: #78716c;
+  --color-interactive-shadow: rgba(120, 113, 108, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #78716c;
+  --color-control-checked-border: #78716c;
+  
+  /* Borders */
+  --color-border-focus: #78716c;
+  --color-border-accent: #d6d3d1;
+  
+  /* Input focus */
+  --color-input-border-focus: #78716c;
+  
+  /* Links */
+  --color-text-link: #57534e;
+  --color-text-link-hover: #44403c;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #57534e;
+  --color-nav-item-bg-active: rgba(120, 113, 108, 0.1);
+  --color-nav-item-border-active: #d6d3d1;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #78716c;
+  --color-button-primary-bg-hover: #57534e;
+  --color-button-primary-text: #ffffff;
+  
+  /* FAB */
+  --color-fab-bg: rgba(120, 113, 108, 0.9);
+  --color-fab-bg-hover: rgba(87, 83, 78, 0.95);
+  --color-fab-border: rgba(168, 162, 158, 0.4);
+  --color-fab-glow: rgba(120, 113, 108, 0.3);
+}
+
+/* Stone accent - Dark mode (higher contrast for readability) */
+.dark.accent-stone,
+.dark.theme-cool.accent-stone {
+  /* Core accent colors - lighter values for dark backgrounds */
+  --color-accent-primary: #a8a29e;         /* stone-400 */
+  --color-accent-hover: #d6d3d1;           /* stone-300 */
+  --color-accent-active: #e7e5e4;          /* stone-200 */
+  --color-accent-muted: rgba(168, 162, 158, 0.15);
+  --color-accent-subtle: rgba(168, 162, 158, 0.08);
+  --color-accent-fg: #d6d3d1;              /* stone-300 - high contrast for text */
+  --color-accent-emphasis: #78716c;        /* stone-500 */
+  --color-accent-glow: rgba(168, 162, 158, 0.12);
+  
+  /* Interactive elements */
+  --color-interactive-bg-strong: #a8a29e;
+  --color-interactive-ring: #a8a29e;
+  --color-interactive-shadow: rgba(168, 162, 158, 0.2);
+  
+  /* Controls (checkboxes, toggles) */
+  --color-control-checked-bg: #a8a29e;
+  --color-control-checked-border: #a8a29e;
+  
+  /* Borders */
+  --color-border-focus: #a8a29e;
+  --color-border-accent: #57534e;
+  
+  /* Input focus */
+  --color-input-border-focus: #a8a29e;
+  
+  /* Links */
+  --color-text-link: #d6d3d1;
+  --color-text-link-hover: #e7e5e4;
+  
+  /* Navigation active states */
+  --color-nav-item-text-active: #d6d3d1;
+  --color-nav-item-bg-active: rgba(168, 162, 158, 0.1);
+  --color-nav-item-border-active: #78716c;
+  
+  /* Primary buttons */
+  --color-button-primary-bg: #a8a29e;
+  --color-button-primary-bg-hover: #d6d3d1;
+  --color-button-primary-text: #1c1917;    /* stone-900 - dark text on light bg */
+  
+  /* FAB */
+  --color-fab-bg: rgba(168, 162, 158, 0.9);
+  --color-fab-bg-hover: rgba(214, 211, 209, 0.95);
+  --color-fab-border: rgba(120, 113, 108, 0.4);
+  --color-fab-glow: rgba(168, 162, 158, 0.3);
+}

@@ -1,0 +1,410 @@
+@import "tailwindcss";
+@import "./frameer/src/styles/base.css";
+@import "./styles/tokens.css";
+
+/* 
+  Fix backdrop-blur utilities for production builds.
+  Tailwind v4 requires explicit theme configuration for backdrop-filter.
+*/
+@theme {
+  --backdrop-blur-0: 0;
+  --backdrop-blur-sm: 4px;
+  --backdrop-blur: 8px;
+  --backdrop-blur-md: 12px;
+  --backdrop-blur-lg: 16px;
+  --backdrop-blur-xl: 24px;
+  --backdrop-blur-2xl: 40px;
+  --backdrop-blur-3xl: 64px;
+}
+
+/**
+ * Informeer Custom Styles
+ * Built on top of Frameer design system
+ * Inspired by Planneer's macOS-style layout
+ */
+
+/* ==================== BASE STYLES ==================== */
+
+html {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* =============================================================================
+   LAYERED LAYOUT SYSTEM - Paper Surface with Depth
+   Creates visual depth with "paper" content floating above a deeper background
+   Note: paper-surface class is now defined in Frameer base.css
+   ============================================================================= */
+
+/* The deep background layer - gives the impression of depth behind the paper */
+.layout-background {
+  background: var(--color-surface-app);
+  position: relative;
+}
+
+/* Subtle pattern for background depth */
+.layout-background::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 25% 25%, rgba(0, 0, 0, 0.02) 0%, transparent 50%),
+    radial-gradient(circle at 75% 75%, rgba(0, 0, 0, 0.01) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.dark .layout-background::after {
+  background-image: 
+    radial-gradient(circle at 25% 25%, rgba(255, 255, 255, 0.015) 0%, transparent 50%),
+    radial-gradient(circle at 75% 75%, rgba(255, 255, 255, 0.01) 0%, transparent 50%);
+}
+
+/* Paper surface overrides - base styles from Frameer base.css */
+.paper-surface {
+  /* Informeer-specific margins for floating effect - matching Planneer */
+  margin-top: 8px;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+
+/* =============================================================================
+   FLOATING HEADER BAR
+   ============================================================================= */
+
+/* Floating header bar container */
+.floating-header-bar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.floating-header-bar > * {
+  pointer-events: auto;
+}
+
+/* =============================================================================
+   CUSTOM SCROLLBAR
+   ============================================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.6);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(139, 148, 158, 0.6);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 148, 158, 0.8);
+}
+
+/* Thin scrollbar variant */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* =============================================================================
+   TYPOGRAPHY
+   ============================================================================= */
+
+.prose {
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose h1 { font-size: 1.875rem; }
+.prose h2 { font-size: 1.5rem; }
+.prose h3 { font-size: 1.25rem; }
+.prose h4 { font-size: 1.125rem; }
+
+.prose p {
+  margin-bottom: 1em;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.prose a {
+  color: var(--color-accent-fg);
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  color: var(--color-accent-emphasis);
+}
+
+.prose code {
+  background: var(--color-surface-inset);
+  padding: 0.125em 0.375em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.prose pre {
+  background: var(--color-surface-secondary);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--color-border-emphasis);
+  padding-left: 1rem;
+  margin-left: 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* =============================================================================
+   ANIMATIONS — Modern, spring-inspired motion system
+   Uses cubic-bezier curves that mimic natural spring physics
+   ============================================================================= */
+
+/* --- Easing tokens (referenced via animation shorthand) --- */
+/* spring-smooth : cubic-bezier(0.34, 1.56, 0.64, 1)  – overshoot-then-settle */
+/* spring-gentle : cubic-bezier(0.22, 1, 0.36, 1)     – gentle deceleration  */
+/* spring-snappy : cubic-bezier(0.16, 1, 0.3, 1)      – fast in, slow settle */
+/* ease-out-expo : cubic-bezier(0.19, 1, 0.22, 1)     – exponential ease-out */
+
+/* ---- Core keyframes ---- */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes slide-out-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes slide-up-full {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+@keyframes slide-down-full {
+  from { transform: translateY(0); }
+  to   { transform: translateY(100%); }
+}
+
+/* Scale + fade for modals & popovers */
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes scale-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.92); }
+}
+
+/* Bounce-scale for play buttons, badges, FABs */
+@keyframes bounce-in {
+  0%   { opacity: 0; transform: scale(0.3); }
+  50%  { opacity: 1; transform: scale(1.08); }
+  70%  { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
+/* Gentle pulse for active states */
+@keyframes soft-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.04); opacity: 0.85; }
+}
+
+/* Stagger-friendly item appear */
+@keyframes list-item-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Backdrop blur-in */
+@keyframes backdrop-in {
+  from { opacity: 0; backdrop-filter: blur(0); -webkit-backdrop-filter: blur(0); }
+  to   { opacity: 1; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+}
+
+/* Mini-player slide-up entrance */
+@keyframes player-enter {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Shimmer / skeleton loader */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ---- Utility classes ---- */
+
+.animate-fade-in {
+  animation: fade-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade-out {
+  animation: fade-out 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-out-left {
+  animation: slide-out-left 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-up-full {
+  animation: slide-up-full 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-scale-out {
+  animation: scale-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-player-enter {
+  animation: player-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-backdrop-in {
+  animation: backdrop-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-list-item-in {
+  animation: list-item-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---- Transition presets ---- */
+
+.transition-spring {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.transition-gentle {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.transition-snappy {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Paper and glass animations are now in Frameer base.css */
+
+/* =============================================================================
+   ENTRY LIST SPECIFIC
+   ============================================================================= */
+
+/* Entry card selection indicator */
+.entry-selected {
+  border-left: 3px solid var(--color-accent-fg);
+}
+
+/* View content area */
+.view-content {
+  background: var(--color-surface-primary);
+  padding-top: 8px;
+}
