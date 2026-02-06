@@ -1,0 +1,3 @@
+[submodule "src/frameer"]
+	path = src/frameer
+	url = https://github.com/jessevl/frameer.git
