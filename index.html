@@ -2,14 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#1a1f2e" />
-    <meta name="description" content="Informeer - A beautiful Miniflux client" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Informeer</title>
+    <meta name="description" content="Informeer - A beautiful Miniflux client" />
+
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#00B42A" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#010409" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-touch-fullscreen" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Informeer" />
+    <meta name="background-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="background-color" content="#010409" media="(prefers-color-scheme: dark)" />
+
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-167.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/icons/app-icon-small.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16.png" />
   </head>
-  <body>
-    <div id="root"></div>
+  <body class="antialiased overflow-hidden" style="min-height: 100lvh; height: 100lvh;">
+    <div id="root" style="min-height: 100lvh; height: 100lvh;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

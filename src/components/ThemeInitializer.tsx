@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { useSettingsStore } from '@/stores/settings';
 
 // All possible accent color classes
-const ACCENT_CLASSES = ['accent-amber', 'accent-blue', 'accent-green', 'accent-red', 'accent-purple', 'accent-pink', 'accent-teal', 'accent-stone'];
+const ACCENT_CLASSES = ['accent-coral', 'accent-amber', 'accent-blue', 'accent-green', 'accent-red', 'accent-purple', 'accent-pink', 'accent-teal', 'accent-stone'];
 
 export default function ThemeInitializer() {
   const theme = useSettingsStore((s) => s.theme);
@@ -30,7 +30,7 @@ export default function ThemeInitializer() {
     }
     
     // Determine the effective accent: use explicit choice or theme default
-    const effectiveAccent = accentColor ?? (themeVariant === 'cool' ? 'blue' : 'stone');
+    const effectiveAccent = accentColor ?? (themeVariant === 'cool' ? 'blue' : 'coral');
     root.classList.add(`accent-${effectiveAccent}`);
     
     // Log for debugging

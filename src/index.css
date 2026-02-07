@@ -1,21 +1,6 @@
 @import "tailwindcss";
+@import "./frameer/src/styles/tokens.css";
 @import "./frameer/src/styles/base.css";
-@import "./styles/tokens.css";
-
-/* 
-  Fix backdrop-blur utilities for production builds.
-  Tailwind v4 requires explicit theme configuration for backdrop-filter.
-*/
-@theme {
-  --backdrop-blur-0: 0;
-  --backdrop-blur-sm: 4px;
-  --backdrop-blur: 8px;
-  --backdrop-blur-md: 12px;
-  --backdrop-blur-lg: 16px;
-  --backdrop-blur-xl: 24px;
-  --backdrop-blur-2xl: 40px;
-  --backdrop-blur-3xl: 64px;
-}
 
 /**
  * Informeer Custom Styles
@@ -31,14 +16,7 @@ html {
 }
 
 body {
-  margin: 0;
-  background: var(--color-surface-app);
   color: var(--color-text-primary);
-  min-height: 100vh;
-}
-
-#root {
-  min-height: 100vh;
 }
 
 /* =============================================================================
@@ -46,29 +24,6 @@ body {
    Creates visual depth with "paper" content floating above a deeper background
    Note: paper-surface class is now defined in Frameer base.css
    ============================================================================= */
-
-/* The deep background layer - gives the impression of depth behind the paper */
-.layout-background {
-  background: var(--color-surface-app);
-  position: relative;
-}
-
-/* Subtle pattern for background depth */
-.layout-background::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: 
-    radial-gradient(circle at 25% 25%, rgba(0, 0, 0, 0.02) 0%, transparent 50%),
-    radial-gradient(circle at 75% 75%, rgba(0, 0, 0, 0.01) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-.dark .layout-background::after {
-  background-image: 
-    radial-gradient(circle at 25% 25%, rgba(255, 255, 255, 0.015) 0%, transparent 50%),
-    radial-gradient(circle at 75% 75%, rgba(255, 255, 255, 0.01) 0%, transparent 50%);
-}
 
 /* Paper surface overrides - base styles from Frameer base.css */
 .paper-surface {
@@ -98,52 +53,6 @@ body {
 
 .floating-header-bar > * {
   pointer-events: auto;
-}
-
-/* =============================================================================
-   CUSTOM SCROLLBAR
-   ============================================================================= */
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.4);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.6);
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(139, 148, 158, 0.6);
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 148, 158, 0.8);
-}
-
-/* Thin scrollbar variant */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
-
-/* Hide scrollbar but keep functionality */
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
 }
 
 /* =============================================================================

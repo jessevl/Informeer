@@ -12,9 +12,9 @@ export type ThemeVariant = 'warm' | 'cool';
 
 /**
  * Accent color options for UI elements like FAB, buttons, focus rings
- * null = use theme default (stone for warm, blue for cool)
+ * null = use theme default (coral for warm, blue for cool)
  */
-export type AccentColor = 'amber' | 'blue' | 'green' | 'red' | 'purple' | 'pink' | 'teal' | 'stone' | null;
+export type AccentColor = 'coral' | 'amber' | 'blue' | 'green' | 'red' | 'purple' | 'pink' | 'teal' | 'stone' | null;
 
 /**
  * View modes for the entry list
@@ -50,7 +50,7 @@ interface SettingsState {
 
 const DEFAULT_SETTINGS = {
   theme: 'system' as Theme,
-  themeVariant: 'cool' as ThemeVariant,
+  themeVariant: 'warm' as ThemeVariant,
   accentColor: null as AccentColor,
   viewMode: 'list' as ViewMode,
   magazineExcerptLines: 5,

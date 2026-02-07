@@ -259,7 +259,8 @@ const AppearanceSettings: React.FC = () => {
   
   // Accent color options with display info
   const accentOptions: { value: AccentColor; label: string; color: string; darkColor: string }[] = [
-    { value: null, label: 'Auto', color: themeVariant === 'warm' ? '#78716c' : '#3b82f6', darkColor: themeVariant === 'warm' ? '#a8a29e' : '#58a6ff' },
+    { value: null, label: 'Auto', color: themeVariant === 'warm' ? '#E8705F' : '#3b82f6', darkColor: themeVariant === 'warm' ? '#F0887A' : '#58a6ff' },
+    { value: 'coral', label: 'Coral', color: '#E8705F', darkColor: '#F0887A' },
     { value: 'amber', label: 'Amber', color: '#f59e0b', darkColor: '#fbbf24' },
     { value: 'blue', label: 'Blue', color: '#3b82f6', darkColor: '#58a6ff' },
     { value: 'green', label: 'Green', color: '#22c55e', darkColor: '#4ade80' },
@@ -368,7 +369,7 @@ const AppearanceSettings: React.FC = () => {
         </div>
         <p className="text-xs text-[var(--color-text-tertiary)] mt-2">
           {accentColor === null 
-            ? `Using theme default (${themeVariant === 'warm' ? 'stone' : 'blue'})`
+            ? `Using theme default (${themeVariant === 'warm' ? 'coral' : 'blue'})`
             : `Custom accent: ${accentColor.charAt(0).toUpperCase() + accentColor.slice(1)}`}
         </p>
       </div>
