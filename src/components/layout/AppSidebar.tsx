@@ -27,7 +27,6 @@ import {
   Video,
   Star,
   MoreHorizontal,
-  Rss,
 } from 'lucide-react';
 import { FeedIcon } from '@/components/feeds/FeedIcon';
 import type { Feed, Category, FeedCounters } from '@/types/miniflux';
@@ -134,9 +133,7 @@ export function AppSidebar({
           )}
         >
           {/* App icon */}
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--color-accent-fg)] to-[var(--color-accent-emphasis)] flex items-center justify-center text-white flex-shrink-0 shadow-sm transition-transform group-hover:scale-105">
-            <Rss size={14} />
-          </div>
+          <img src="/icons/app-icon-small.svg" alt="Informeer" className="w-12 h-12 flex-shrink-0 transition-transform group-hover:scale-105" />
           {/* App name */}
           <span className="flex-1 text-sm font-semibold text-[var(--color-text-primary)] truncate text-left">
             Informeer

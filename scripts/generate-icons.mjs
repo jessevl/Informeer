@@ -9,15 +9,28 @@ import { existsSync } from 'fs';
 
 const iconsDir = 'public/icons';
 const svgSource = `${iconsDir}/app-icon.svg`;
+const svgSmall = `${iconsDir}/app-icon-small.svg`;
 
 if (!existsSync(svgSource)) {
   console.error(`SVG source not found: ${svgSource}`);
   process.exit(1);
 }
 
-const sizes = [16, 32, 72, 96, 128, 144, 152, 167, 180, 192, 384, 512];
+const hasSmall = existsSync(svgSmall);
 
-for (const size of sizes) {
+// Small sizes use the simplified SVG (no background) for clarity
+const smallSizes = [16, 32];
+const largeSizes = [72, 96, 128, 144, 152, 167, 180, 192, 384, 512];
+
+for (const size of smallSizes) {
+  const src = hasSmall ? svgSmall : svgSource;
+  const label = hasSmall ? ' (small variant)' : '';
+  const output = `${iconsDir}/icon-${size}.png`;
+  console.log(`Generating ${output} (${size}x${size})${label}...`);
+  execSync(`rsvg-convert -w ${size} -h ${size} ${src} -o ${output}`);
+}
+
+for (const size of largeSizes) {
   const output = `${iconsDir}/icon-${size}.png`;
   console.log(`Generating ${output} (${size}x${size})...`);
   execSync(`rsvg-convert -w ${size} -h ${size} ${svgSource} -o ${output}`);
@@ -30,7 +43,9 @@ for (const size of [192, 512]) {
   execSync(`rsvg-convert -w ${size} -h ${size} ${svgSource} -o ${output}`);
 }
 
-// Also copy favicon.png from the 32px version
-execSync(`cp ${iconsDir}/icon-32.png ${iconsDir}/favicon.png`);
+// Favicon from small variant for clarity
+const faviconSrc = hasSmall ? svgSmall : svgSource;
+execSync(`rsvg-convert -w 32 -h 32 ${faviconSrc} -o ${iconsDir}/favicon.png`);
+console.log(`Generated favicon.png${hasSmall ? ' (small variant)' : ''}`);
 
 console.log('Done! All icons generated.');

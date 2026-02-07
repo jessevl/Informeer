@@ -2,7 +2,6 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth';
 import { Button, Input, Panel } from '@frameer/components/ui';
-import { Rss } from 'lucide-react';
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -26,9 +25,7 @@ function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[var(--color-accent-primary)] text-white mb-4">
-            <Rss size={32} />
-          </div>
+          <img src="/icons/app-icon-small.svg" alt="Informeer" className="w-32 h-32 mb-6" />
           <h1 className="text-2xl font-semibold text-[var(--color-text-primary)]">
             Informeer
           </h1>
