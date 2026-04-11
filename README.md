@@ -10,6 +10,17 @@ Informeer is a self-hosted media and reading application built for people who wa
   <img src="frontend/public/icons/app-icon.svg" alt="Informeer logo" width="180">
 </p>
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Home feed](screenshots/01-home-feed.png) | ![Podcasts](screenshots/02-podcasts.png) |
+| **Home Feed** — The main view showing articles from all subscribed feeds in a multi-column card layout, with source icons, publication timestamps, and estimated read times. | **Podcasts** — The audio library displaying subscribed podcast shows as cover art tiles, with recent episodes and progress indicators. |
+| ![Video](screenshots/03-video-feed.png) | ![Magazines](screenshots/04-magazines.png) |
+| **Video Feed** — YouTube subscriptions presented as a clean video grid with thumbnails and channel names, without algorithmically recommended noise. | **Magazines & Newspapers** — The magazine view with recent issue covers grouped by publication, including PDF-backed magazine back-issues and daily newspaper editions. |
+| ![Books](screenshots/05-books.png) | ![Article Reader](screenshots/06-article-reader.png) |
+| **Books Library** — Imported EPUB books shown as a cover grid with reading-state filters (All / Unread / Reading / Finished / Offline). | **Article Reader** — The split-pane reading view with the feed list on the left and a full-text article open on the right, including TTS, bookmarking, and sharing controls. |
+
 ## Features
 
 - **Feed Reading** — Subscribe to RSS, Atom, and JSON Feed sources with clean article reading and full-text extraction
