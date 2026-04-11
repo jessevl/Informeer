@@ -1,0 +1,24 @@
+{
+  "name": "informeer",
+  "private": true,
+  "version": "0.1.11",
+  "description": "Informeer — self-hosted feed reader",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "dev": "concurrently -n api,frontend -c blue,green \"npm run dev:api\" \"npm run dev:frontend\"",
+    "dev:api": "cd api && bun run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "hooks:install": "git config --local core.hooksPath .githooks && git config --local push.recurseSubmodules check && chmod +x .githooks/pre-push",
+    "build": "npm run build:frontend && npm run build:api",
+    "build:frontend": "cd frontend && npm run build",
+    "build:api": "cd api && bun run build",
+    "test": "cd api && bun test",
+    "typecheck": "cd frontend && npx tsc --noEmit && cd ../api && bun run typecheck",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

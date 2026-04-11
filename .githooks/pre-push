@@ -1,0 +1,52 @@
+#!/bin/sh
+
+set -eu
+
+submodule_path="frontend/src/frameer"
+
+if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
+if ! git ls-tree HEAD "$submodule_path" >/dev/null 2>&1; then
+  exit 0
+fi
+
+head_sha="$(git ls-tree HEAD "$submodule_path" | awk '{print $3}')"
+
+if [ -z "$head_sha" ]; then
+  exit 0
+fi
+
+upstream_ref="$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)"
+upstream_sha=""
+
+if [ -n "$upstream_ref" ]; then
+  upstream_sha="$(git ls-tree "$upstream_ref" "$submodule_path" 2>/dev/null | awk '{print $3}')"
+fi
+
+if [ -n "$upstream_sha" ] && [ "$head_sha" != "$upstream_sha" ]; then
+  remote_refs="$(git -C "$submodule_path" branch -r --contains "$head_sha" 2>/dev/null || true)"
+
+  if [ -n "$remote_refs" ]; then
+    exit 0
+  fi
+
+  printf '%s\n' "Push blocked: this branch changes the $submodule_path submodule pointer to a commit that is not published on any submodule remote branch." >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "Upstream: $upstream_sha" >&2
+  printf '%s\n' "HEAD:     $head_sha" >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "If this Frameer change is intentional:" >&2
+  printf '%s\n' "  1. cd $submodule_path" >&2
+  printf '%s\n' "  2. git push origin HEAD:main" >&2
+  printf '%s\n' "  3. cd -" >&2
+  printf '%s\n' "  4. git push" >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "If the submodule bump was accidental, restore the upstream pointer and recommit:" >&2
+  printf '%s\n' "  git checkout $upstream_ref -- $submodule_path" >&2
+  printf '%s\n' "  git commit --amend --no-edit" >&2
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    # Prevent double-runs from the version bump commit
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+          submodules: recursive
+
+      - name: Determine Version
+        id: versioning
+        run: |
+          # Get current version from file
+          CURRENT_VERSION=$(cat VERSION 2>/dev/null || echo "0.1.0")
+          echo "Current version in file: $CURRENT_VERSION"
+          
+          # Check if this version is already tagged
+          TAG_EXISTS=$(git tag -l "v$CURRENT_VERSION")
+          
+          # Get previous version from git history to see if it was manually changed in this push
+          PREVIOUS_VERSION=$(git show HEAD~1:VERSION 2>/dev/null || echo "0.1.0")
+          
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -z "$TAG_EXISTS" ] && [ "${{ github.event_name }}" == "push" ]; then
+            NEW_VERSION=$CURRENT_VERSION
+            echo "Manual version update detected and not yet tagged: $NEW_VERSION"
+          else
+            # We need to bump because either it wasn't manually changed, or the manual change is already tagged
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            
+            # Determine bump type
+            BUMP_TYPE="patch"
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              BUMP_TYPE="${{ github.event.inputs.version_bump }}"
+            else
+              # Check commit messages for [major] or [minor]
+              if git log -1 --pretty=%B | grep -qi "\[major\]"; then
+                BUMP_TYPE="major"
+              elif git log -1 --pretty=%B | grep -qi "\[minor\]"; then
+                BUMP_TYPE="minor"
+              fi
+            fi
+            
+            # Calculate new version
+            if [[ "$BUMP_TYPE" == "major" ]]; then
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+            elif [[ "$BUMP_TYPE" == "minor" ]]; then
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+            else
+              NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            fi
+            
+            # Safety check: if the NEW_VERSION is also already tagged, keep bumping patch
+            while [ -n "$(git tag -l "v$NEW_VERSION")" ]; do
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$NEW_VERSION"
+              NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            done
+          fi
+          
+          echo "Final release version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Update VERSION file if it changed
+          if [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "$NEW_VERSION" > VERSION
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit version bump
+        id: commit
+        if: steps.versioning.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.versioning.outputs.version }} [skip ci]"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Get the last tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"* %s (%h)" --no-merges)
+          else
+            COMMITS=$(git log --pretty=format:"* %s (%h)" $PREVIOUS_TAG..HEAD --no-merges)
+          fi
+          
+          if [ -z "$COMMITS" ]; then
+            COMMITS="* ${{ github.event.head_commit.message }} (${{ github.sha }})"
+          fi
+          
+          REPO_URL="https://github.com/${{ github.repository }}"
+          FORMATTED_CHANGELOG=$(echo "$COMMITS" | sed -E "s|#([0-9]+)|[#\1]($REPO_URL/issues/\1)|g")
+          
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "## What's Changed" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$FORMATTED_CHANGELOG" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Full Changelog**: $REPO_URL/compare/${PREVIOUS_TAG:-main}...v${{ steps.versioning.outputs.version }}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase Repository Name
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            VERSION=${{ steps.versioning.outputs.version }}
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}:latest
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.versioning.outputs.version }}
+            ghcr.io/${{ steps.repo.outputs.name }}:v${{ steps.versioning.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.versioning.outputs.version }}
+          name: v${{ steps.versioning.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          target_commitish: ${{ steps.commit.outputs.sha || github.sha }}
+          draft: false
+          prerelease: false

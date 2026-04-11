@@ -1,0 +1,22 @@
+services:
+  informeer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3011:3011"
+    volumes:
+      - informeer-data:/data
+    environment:
+      - PORT=3011
+      - HOST=0.0.0.0
+      - DATABASE_PATH=/data/informeer.db
+      - DATA_DIR=/data
+      - FRONTEND_DIR=./public
+      - SECRET_KEY=${SECRET_KEY:-}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}  # Set via env or .env file
+    restart: unless-stopped
+
+volumes:
+  informeer-data:
