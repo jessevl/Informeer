@@ -101,6 +101,7 @@ export function AppSidebar({
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const isPhone = isMobile && !isTablet;
+  const allowCollapsedRail = !isMobile && !isTablet;
   const [pinnedFeedIds, setPinnedFeedIds] = useState<number[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -280,7 +281,7 @@ export function AppSidebar({
     return feedMatch && categoryMatch && starredMatch && mediaTypeMatch;
   };
 
-  if (collapsed && !isPhone) {
+  if (collapsed && allowCollapsedRail) {
     return (
       <SidebarRail
         feedsByCategory={feedsByCategory}
@@ -342,7 +343,7 @@ export function AppSidebar({
       onSidebarPinnedChange={handleSidebarPinnedChange}
       onTogglePinnedFeed={handleTogglePinnedFeed}
       pinnedFeedIds={pinnedFeedIds}
-      showPanelControls={!isPhone}
+      showPanelControls={allowCollapsedRail}
     />
   );
 }
