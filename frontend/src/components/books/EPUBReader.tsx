@@ -163,22 +163,31 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const restoreFrameRef = useRef<number | null>(null);
   const manualSpreadPreferenceRef = useRef(false);
 
-  const {
-    currentCfi,
-    currentPercentage,
-    currentChapter,
-    highlights,
-    updateProgress,
-    syncProgress,
-    addHighlight,
-  } = useBooksStore();
-  const lastKnownCfiRef = useRef(currentCfi);
+  // Actions (stable references — won't cause re-renders)
+  const updateProgress = useBooksStore(s => s.updateProgress);
+  const syncProgress = useBooksStore(s => s.syncProgress);
+  const addHighlight = useBooksStore(s => s.addHighlight);
+  const highlights = useBooksStore(s => s.highlights);
+
+  // Snapshot initial progress at mount — read once, not reactive,
+  // so page-turn updateProgress() calls don't trigger component re-renders
+  const [initialProgress] = useState(() => {
+    const store = useBooksStore.getState();
+    const cached = store.progressCache[book.id];
+    return {
+      cfi: cached?.cfi || store.currentCfi || '',
+      percentage: cached?.percentage || store.currentPercentage || 0,
+      chapter: cached?.chapter || store.currentChapter || '',
+      updated_at: cached?.updated_at || null,
+    };
+  });
+  const lastKnownCfiRef = useRef(initialProgress.cfi);
 
   // --- Core state ---
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [chapter, setChapter] = useState(currentChapter || '');
-  const [percentage, setPercentage] = useState(currentPercentage || 0);
+  const [chapter, setChapter] = useState(initialProgress.chapter);
+  const [percentage, setPercentage] = useState(initialProgress.percentage);
   const [showControls, setShowControls] = useState(true);
 
   // --- Spread mode ---
@@ -195,7 +204,6 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const epubLightTheme = useSettingsStore(s => s.epubLightTheme);
   const epubDarkTheme = useSettingsStore(s => s.epubDarkTheme);
   const recentOfflineBooksLimit = useSettingsStore(s => s.recentOfflineBooksLimit);
-  const isOnline = useConnectivityStore((s) => s.isOnline);
   const offlineRegistry = useOfflineRegistry();
   const isLandscapeViewport = useIsLandscapeViewport();
 
@@ -223,10 +231,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // --- Auto-hide toolbar ---
   const [controlsTick, setControlsTick] = useState(0);
 
-  // --- Resume toast ---
-  const [showResumeToast, setShowResumeToast] = useState(false);
-  const [resumePercentage, setResumePercentage] = useState(currentPercentage || 0);
-  const hasShownResumeRef = useRef(false);
+  // --- Progress tracking for remote sync ---
+  const chapterRef = useRef(initialProgress.chapter);
+  const [maxPercentage, setMaxPercentage] = useState(initialProgress.percentage);
+  const [locationsReady, setLocationsReady] = useState(false);
 
   const queueRestoreToCfi = useCallback((cfi?: string | null) => {
     const rendition = renditionRef.current;
@@ -271,6 +279,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     try {
       const remote = await api.getBookProgress(book.id);
       if (!remote.cfi || remote.percentage <= 0) return null;
+      // Same CFI = same position — skip to avoid false "another device" prompts
+      // caused by percentage rounding differences across location generations
+      if (remote.cfi === lastKnownCfiRef.current) return null;
       return {
         value: remote.percentage,
         label: `${Math.round(remote.percentage * 100)}%`,
@@ -281,16 +292,6 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     }
   }, [book.id]);
 
-  const progressCache = useBooksStore(s => s.progressCache);
-  const localProgress = progressCache[book.id] ?? null;
-  const localMaxPercentage = localProgress?.percentage || percentage;
-
-  useEffect(() => {
-    if (currentCfi) {
-      lastKnownCfiRef.current = currentCfi;
-    }
-  }, [currentCfi]);
-
   useEffect(() => {
     if (!manualSpreadPreferenceRef.current) {
       setIsSpreadView(isLandscapeViewport);
@@ -298,10 +299,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   }, [isLandscapeViewport]);
 
   const remoteSync = useRemoteProgressSync({
-    enabled: !isLoading,
+    enabled: !isLoading && locationsReady,
     fetchRemoteProgress: fetchBookRemoteProgress,
-    localMaxPosition: localMaxPercentage,
-    threshold: 0.005,
+    localMaxPosition: maxPercentage,
+    threshold: 0.02,
     pollInterval: 10_000,
   });
 
@@ -394,7 +395,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
     const init = async () => {
       try {
-        const remoteProgressPromise = isOnline
+        const remoteProgressPromise = navigator.onLine
           ? api.getBookProgress(book.id).catch(() => null)
           : Promise.resolve(null);
 
@@ -449,23 +450,19 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         const epub = ePub(arrayBuffer);
         epubRef.current = epub;
 
-        const initialProgress = chooseInitialProgress(
-          localProgress ?? {
-            cfi: currentCfi,
-            percentage: currentPercentage,
-            chapter: currentChapter,
-            updated_at: null,
-          },
-          await remoteProgressPromise,
-        );
-        const initialCfi = initialProgress?.cfi || '';
-        const initialPercentage = initialProgress?.percentage || 0;
-        const initialChapter = initialProgress?.chapter || '';
+        // Read latest store progress (may include server data fetched by openReader)
+        const storeProgress = useBooksStore.getState().progressCache[book.id] ?? null;
+        const localProg = storeProgress ?? initialProgress;
+        const bestProgress = chooseInitialProgress(localProg, await remoteProgressPromise);
+        const initialCfi = bestProgress?.cfi || '';
+        const initialPercentage = bestProgress?.percentage || 0;
+        const initialChapter = bestProgress?.chapter || '';
 
         lastKnownCfiRef.current = initialCfi;
         setPercentage(initialPercentage);
-        setResumePercentage(initialPercentage);
+        setMaxPercentage(prev => Math.max(prev, initialPercentage));
         setChapter(initialChapter);
+        chapterRef.current = initialChapter;
 
         // Determine initial spread based on viewport
         const viewerEl = viewerRef.current!;
@@ -506,14 +503,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           // to avoid resetting the stored percentage to 0 on initial load
           if (locationsReadyRef.current) {
             setPercentage(pct);
-          }
-
-          // Show resume toast once after first relocation with a real percentage
-          if (!hasShownResumeRef.current && currentCfi && pct > 0) {
-            hasShownResumeRef.current = true;
-            setResumePercentage(pct);
-            setShowResumeToast(true);
-            setTimeout(() => setShowResumeToast(false), 2500);
+            setMaxPercentage(prev => Math.max(prev, pct));
           }
 
           // Overall page number from locations
@@ -536,7 +526,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           }
 
           // Chapter name — use href from current location for accurate matching
-          let resolvedChapter = chapter;
+          let resolvedChapter = chapterRef.current;
           if (location.start?.href) {
             const locHref = location.start.href.split('#')[0];
             const navItem = epub.navigation?.toc?.find(
@@ -547,6 +537,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             );
             if (navItem) {
               resolvedChapter = navItem.label?.trim() || '';
+              chapterRef.current = resolvedChapter;
               setChapter(resolvedChapter);
             }
           }
@@ -712,7 +703,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         // Generate locations for page numbers & percentages
         epub.ready.then(() => epub.locations.generate(1600)).then(() => {
           locationsReadyRef.current = true;
-          queueRestoreToCfi();
+          setLocationsReady(true);
         });
 
         // Apply saved highlights
@@ -746,22 +737,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       epubRef.current = null;
       renditionRef.current = null;
       locationsReadyRef.current = false;
+      setLocationsReady(false);
       currentBookDataRef.current = null;
     };
-  }, [
-    book.id,
-    book.title,
-    book.author,
-    currentCfi,
-    currentPercentage,
-    currentChapter,
-    isOnline,
-    isSpreadView,
-    localProgress,
-    queueRestoreToCfi,
-    recentOfflineBooksLimit,
-    sessionCacheKey,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [book.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === Update spread mode ===
   useEffect(() => {
@@ -1222,25 +1201,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         )}
       </div>
 
-      {/* ─── Resume toast ─── */}
-      {showResumeToast && (
-        <div className={cn(
-          'absolute bottom-20 left-1/2 -translate-x-1/2 z-50',
-          'px-4 py-2 rounded-full',
-          'bg-[var(--color-surface-primary)]/90 backdrop-blur-sm',
-          'border border-[var(--color-border-subtle)]',
-          'text-xs text-[var(--color-text-secondary)]',
-          'animate-fade-in shadow-lg',
-          'reader-overlay-surface',
-        )}>
-          Resumed at {Math.round(resumePercentage * 100)}%
-          {chapter && <span className="ml-1 opacity-70">· {chapter}</span>}
-        </div>
-      )}
-
       {/* ─── Cross-device sync toast ─── */}
       <SyncPositionToast
-        visible={remoteSync.hasRemoteUpdate && !showResumeToast}
+        visible={remoteSync.hasRemoteUpdate}
         position={remoteSync.remotePosition}
         onAccept={handleAcceptRemotePosition}
         onDismiss={remoteSync.dismissRemotePosition}
