@@ -728,7 +728,7 @@ export function PDFViewer({
   // ─── Shared gesture & keyboard hooks ───────────────────────────────
   const gestures = useReaderGestures(
     { nextPage, prevPage, canGoNext, canGoPrev },
-    { scale, setScale, maxScale: 5 },
+    { scale, setScale, maxScale: 5, enableSwipePreview: !einkMode },
   );
 
   useReaderKeyboard({

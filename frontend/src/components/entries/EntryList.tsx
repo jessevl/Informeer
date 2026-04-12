@@ -771,6 +771,11 @@ function VirtualizedMasonry({
   // No column spanning - all items single column
   const getItemColSpan = useCallback(() => 1, []);
 
+  const getItemKey = useCallback((index: number) => {
+    const entry = entries[index];
+    return entry?.id ?? index;
+  }, [entries]);
+
   // Estimate item heights based on content and reading time
   const estimateItemHeight = useCallback((index: number) => {
     const entry = entries[index];
@@ -811,6 +816,7 @@ function VirtualizedMasonry({
     overscan: 10,
     lanes,
     gap: columnGap,
+    getItemKey,
     getItemColSpan, // Native colSpan support!
     useAnimationFrameWithResizeObserver: true,
     resizeDelay: 50,

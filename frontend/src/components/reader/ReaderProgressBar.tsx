@@ -31,6 +31,8 @@ interface ReaderProgressBarProps {
   markers?: ProgressMarker[];
   /** Extra class on the container */
   className?: string;
+  /** Disable slider interaction while positions are still being prepared */
+  disabled?: boolean;
 }
 
 export function ReaderProgressBar({
@@ -43,6 +45,7 @@ export function ReaderProgressBar({
   highlightPosition,
   markers,
   className,
+  disabled = false,
 }: ReaderProgressBarProps) {
   if (totalPositions <= 0) return null;
 
@@ -76,6 +79,7 @@ export function ReaderProgressBar({
             max={totalPositions}
             value={currentPosition}
             onChange={(e) => onPositionChange(parseInt(e.target.value, 10))}
+            disabled={disabled}
             className="w-full h-1 accent-[var(--color-accent)]"
           />
 

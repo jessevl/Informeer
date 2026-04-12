@@ -31,6 +31,8 @@ export interface ReaderGestureOptions {
   enableClickZones?: boolean;
   /** Enable pinch-to-zoom */
   enableZoom?: boolean;
+  /** Enable live horizontal drag preview before a page turn commits */
+  enableSwipePreview?: boolean;
 }
 
 export interface ReaderGestureState {
@@ -69,6 +71,7 @@ export function useReaderGestures(
     maxScale = 3,
     enableClickZones = true,
     enableZoom = true,
+    enableSwipePreview = true,
   } = options;
 
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -287,13 +290,15 @@ export function useReaderGestures(
       panOffsetRef.current = newPan;
       setPanOffset(newPan);
     } else if (scaleRef.current <= 1) {
-      if (Math.abs(dx) > Math.abs(dy) * 1.2 && Math.abs(dx) > 10) {
+      if (enableSwipePreview && Math.abs(dx) > Math.abs(dy) * 1.2 && Math.abs(dx) > 10) {
         const { canGoNext, canGoPrev } = callbacksRef.current;
         const atEdge = (dx > 0 && !canGoPrev) || (dx < 0 && !canGoNext);
         setSwipeOffset(atEdge ? dx * 0.2 : dx * 0.4);
+      } else if (!enableSwipePreview && swipeOffset !== 0) {
+        setSwipeOffset(0);
       }
     }
-  }, []);
+  }, [enableSwipePreview, swipeOffset]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (touchStartRef.current && e.touches.length === 0) {
