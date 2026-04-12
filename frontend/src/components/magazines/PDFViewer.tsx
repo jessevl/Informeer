@@ -160,7 +160,6 @@ export function PDFViewer({
   const { setAdPages: storeSetAdPages, getEffectiveAdPages, adPageCache, toggleAdPageOverride } = useMagazinesStore();
 
   // Offline state
-  const isOnline = useConnectivityStore((s) => s.isOnline);
   const offlineRegistry = useOfflineRegistry();
   const offlineItem = useMemo(
     () => offlineRegistry.find((item) => item.type === 'magazine' && item.id === (entryId || '')) ?? null,
@@ -311,6 +310,7 @@ export function PDFViewer({
   useEffect(() => {
     let cancelled = false;
     let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+    let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
 
     async function loadPdf() {
       setIsLoading(true);
@@ -349,10 +349,16 @@ export function PDFViewer({
               : undefined,
           });
         }
-        const pdfDoc = await loadingTask.promise;
+        pdfDoc = await loadingTask.promise;
 
         if (cancelled) return;
 
+        // Cache PDF data for session reuse and offline access.
+        // Read values from stores/props at call time (not as effect deps).
+        const currentCoverUrl = coverUrl;
+        const currentFeedTitle = feedTitle;
+        const currentTitle = title;
+        const currentRecentLimit = useSettingsStore.getState().recentOfflineMagazinesLimit;
         pdfDoc.getData()
           .then((data) => {
             if (!cancelled) {
@@ -360,10 +366,10 @@ export function PDFViewer({
               currentPdfDataRef.current = latestData;
               writeSessionPdf(sessionCacheKey, latestData);
 
-              if (entryId && recentOfflineMagazinesLimit > 0) {
-                saveMagazineOfflineData(entryId, title || 'Magazine', latestData, coverUrl, feedTitle, {
+              if (entryId && currentRecentLimit > 0) {
+                saveMagazineOfflineData(entryId, currentTitle || 'Magazine', latestData, currentCoverUrl, currentFeedTitle, {
                   retention: 'recent',
-                  maxRecentItems: recentOfflineMagazinesLimit,
+                  maxRecentItems: currentRecentLimit,
                 }).catch((error) => {
                   console.error('[pdf-viewer] Recent offline cache failed:', error);
                 });
@@ -409,9 +415,12 @@ export function PDFViewer({
       cancelled = true;
       // Abort the in-flight download so StrictMode re-mounts don't fetch twice
       loadingTask?.destroy();
+      // Free pdf.js internal resources (worker message ports, font/page caches)
+      pdfDoc?.destroy();
+      pdfDoc = null;
       currentPdfDataRef.current = null;
     };
-  }, [coverUrl, entryId, feedTitle, isOnline, pdfUrl, recentOfflineMagazinesLimit, sessionCacheKey, title]);
+  }, [entryId, pdfUrl, sessionCacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run ad detection after PDF loads
   useEffect(() => {
@@ -544,26 +553,34 @@ export function PDFViewer({
     const context = canvas.getContext('2d');
     if (!context) return;
 
-    // HiDPI: render at device pixel ratio for sharp output on Retina displays
     const dpr = window.devicePixelRatio || 1;
-
     const viewport = page.getViewport({ scale: 1 });
     const widthFactor = segment === 'full' ? 1 : 0.5;
     const scaleX = availableWidth / (viewport.width * widthFactor);
     const scaleY = availableHeight / viewport.height;
     const fitScale = Math.min(scaleX, scaleY) * scale;
 
-    const scaledViewport = page.getViewport({ scale: fitScale * dpr });
+    // CSS dimensions (what the user sees)
     const cssViewport = page.getViewport({ scale: fitScale });
-    const renderWidth = segment === 'full' ? scaledViewport.width : scaledViewport.width / 2;
     const cssWidth = segment === 'full' ? cssViewport.width : cssViewport.width / 2;
+    const cssHeight = cssViewport.height;
 
-    // Canvas buffer at full device resolution
+    // Cap canvas pixel budget to prevent OOM on high-DPR + high-zoom combos.
+    // 16M pixels ≈ 64 MB RGBA — safe on most devices.
+    const MAX_CANVAS_PIXELS = 16_777_216;
+    const targetPixels = (cssWidth * dpr) * (cssHeight * dpr);
+    const effectiveDpr = targetPixels > MAX_CANVAS_PIXELS
+      ? dpr * Math.sqrt(MAX_CANVAS_PIXELS / targetPixels)
+      : dpr;
+
+    const renderScale = fitScale * effectiveDpr;
+    const scaledViewport = page.getViewport({ scale: renderScale });
+    const renderWidth = segment === 'full' ? scaledViewport.width : scaledViewport.width / 2;
+
     canvas.width = renderWidth;
     canvas.height = scaledViewport.height;
-    // CSS size at logical pixel dimensions
     canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssViewport.height}px`;
+    canvas.style.height = `${cssHeight}px`;
 
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -577,6 +594,10 @@ export function PDFViewer({
     });
     renderTasksRef.current.push(task);
     await task.promise;
+
+    // Free pdf.js decoded image data for this page (the canvas already has
+    // the rendered bitmap). The page object stays cached for fast re-render.
+    page.cleanup();
   }, [pdf, scale]);
 
   // Render current page(s)
@@ -640,6 +661,22 @@ export function PDFViewer({
       renderPages();
     }
   }, [pdf, currentPage, scale, isSpreadView, renderPages, totalPages]);
+
+  // Release canvas GPU/RAM backing stores and cancel pending renders on unmount
+  useEffect(() => {
+    return () => {
+      for (const task of renderTasksRef.current) {
+        task.cancel();
+      }
+      renderTasksRef.current = [];
+      for (const canvas of [canvasLeftRef.current, canvasRightRef.current]) {
+        if (canvas) {
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      }
+    };
+  }, []);
 
   // iOS/mobile: re-render canvas when app returns from background.
   // Safari purges canvas content when the page is suspended.
