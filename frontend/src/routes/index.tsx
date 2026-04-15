@@ -552,7 +552,8 @@ function HomePage() {
             <EntryList
               entries={filteredEntries}
               selectedEntry={selectedEntry}
-              isLoading={isLoading || isLoadingMore}
+              isLoading={isLoading}
+              isLoadingMore={isLoadingMore}
               isRefetching={isRefetching}
               hasMore={hasMore}
               title={getViewTitle()}

@@ -30,6 +30,45 @@ function buildFilterKey(filter: Pick<EntriesState, 'status' | 'feedId' | 'catego
   ]);
 }
 
+type ClientFilterSnapshot = Pick<EntriesState, 'feedId' | 'categoryId' | 'mediaType'>;
+
+function applyClientSideFilters(entries: Entry[], filter: ClientFilterSnapshot): Entry[] {
+  const { magazinesCategoryId } = useSettingsStore.getState();
+  const { feeds, categories } = useFeedsStore.getState();
+
+  const hiddenFeedIds = new Set(feeds.filter((feed) => feed.hide_globally).map((feed) => feed.id));
+  const hiddenCategoryIds = new Set(categories.filter((category) => category.hide_globally).map((category) => category.id));
+
+  let filtered = entries;
+
+  if (filter.feedId === null && filter.categoryId === null) {
+    filtered = filtered.filter((entry) => {
+      if (entry.feed_id && hiddenFeedIds.has(entry.feed_id)) {
+        return false;
+      }
+
+      if (entry.feed?.category?.id && hiddenCategoryIds.has(entry.feed.category.id)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    if (filter.mediaType === 'all' && magazinesCategoryId !== null) {
+      filtered = filtered.filter((entry) => entry.feed?.category?.id !== magazinesCategoryId);
+    }
+  }
+
+  if (filter.mediaType === 'audio') filtered = filtered.filter(isAudioEntry);
+  if (filter.mediaType === 'video') filtered = filtered.filter(isVideoEntry);
+
+  return filtered;
+}
+
+function usesClientSideFilteredPagination(filter: ClientFilterSnapshot): boolean {
+  return filter.mediaType === 'audio' || filter.mediaType === 'video' || (filter.feedId === null && filter.categoryId === null);
+}
+
 // Helper to check if an entry is audio content (podcast)
 function isAudioEntry(entry: Entry): boolean {
   // Check enclosures for audio mime types
@@ -115,52 +154,15 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
   // Get entries filtered by media type and hide_globally (client-side filtering since Informeer doesn't support this)
   getFilteredEntries: () => {
     const { entries, mediaType, feedId, categoryId } = get();
-    const { magazinesCategoryId } = useSettingsStore.getState();
-    
-    // Get feeds and categories data for hide_globally filtering
-    const { feeds, categories } = useFeedsStore.getState();
-    
-    // Build sets of hidden feed IDs and category IDs
-    const hiddenFeedIds = new Set(
-      feeds.filter(f => f.hide_globally).map(f => f.id)
-    );
-    const hiddenCategoryIds = new Set(
-      categories.filter(c => c.hide_globally).map(c => c.id)
-    );
-    
-    let filtered = entries;
-    
-    // Apply hide_globally filtering only in global view (no specific feed or category selected)
-    if (feedId === null && categoryId === null) {
-      filtered = filtered.filter(entry => {
-        // Check if entry's feed is hidden
-        if (entry.feed_id && hiddenFeedIds.has(entry.feed_id)) {
-          return false;
-        }
-        // Check if entry's category is hidden
-        if (entry.feed?.category?.id && hiddenCategoryIds.has(entry.feed.category.id)) {
-          return false;
-        }
-        return true;
-      });
 
-      if (mediaType === 'all' && magazinesCategoryId !== null) {
-        filtered = filtered.filter((entry) => entry.feed?.category?.id !== magazinesCategoryId);
-      }
-    }
-    
-    // Apply media type filtering
-    if (mediaType === 'audio') filtered = filtered.filter(isAudioEntry);
-    if (mediaType === 'video') filtered = filtered.filter(isVideoEntry);
-    // 'magazines' type is handled by MagazinesView directly via magazineFeedIds
-    
-    return filtered;
+    return applyClientSideFilters(entries, { mediaType, feedId, categoryId });
   },
 
   // Fetch entries with current filters
   fetchEntries: async (reset = true) => {
     const requestId = ++latestEntriesRequestId;
     const { status, feedId, categoryId, starred, searchQuery, limit, mediaType } = get();
+    const filterSnapshot: ClientFilterSnapshot = { feedId, categoryId, mediaType };
 
     if (reset) {
       if (get().entries.length === 0) {
@@ -180,47 +182,68 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     try {
       // Use higher limit for media types since they're filtered client-side
       const effectiveLimit = (mediaType === 'audio' || mediaType === 'video' || mediaType === 'magazines') ? 500 : limit;
-      
-      const params: EntryQueryParams = {
+      const baseParams: EntryQueryParams = {
         limit: effectiveLimit,
-        offset: 0,
         order: 'published_at',
         direction: 'desc',
       };
 
-      // Apply filters
       if (status !== 'all') {
-        params.status = status;
+        baseParams.status = status;
       }
       if (starred) {
-        params.starred = true;
+        baseParams.starred = true;
       }
       if (searchQuery) {
-        params.search = searchQuery;
+        baseParams.search = searchQuery;
       }
       if (categoryId) {
-        params.category_id = categoryId;
+        baseParams.category_id = categoryId;
       }
 
-      // Fetch entries based on context
-      let response;
-      if (feedId) {
-        response = await api.getFeedEntries(feedId, params);
-      } else if (categoryId) {
-        response = await api.getCategoryEntries(categoryId, params);
-      } else {
-        response = await api.getEntries(params);
-      }
+      const fetchPage = async (pageOffset: number) => {
+        const params: EntryQueryParams = { ...baseParams, offset: pageOffset };
 
-      if (requestId !== latestEntriesRequestId) {
-        return;
+        if (feedId) {
+          return api.getFeedEntries(feedId, params);
+        }
+        if (categoryId) {
+          return api.getCategoryEntries(categoryId, params);
+        }
+        return api.getEntries(params);
+      };
+
+      let accumulatedEntries: Entry[] = [];
+      let total = 0;
+      let nextOffset = 0;
+
+      while (true) {
+        const response = await fetchPage(nextOffset);
+
+        if (requestId !== latestEntriesRequestId) {
+          return;
+        }
+
+        accumulatedEntries = [...accumulatedEntries, ...response.entries];
+        total = response.total;
+        nextOffset += response.entries.length;
+
+        const visibleEntries = applyClientSideFilters(accumulatedEntries, filterSnapshot);
+        const shouldContinue = usesClientSideFilteredPagination(filterSnapshot)
+          && response.entries.length > 0
+          && nextOffset < total
+          && visibleEntries.length < limit;
+
+        if (!shouldContinue) {
+          break;
+        }
       }
 
       set({
-        entries: response.entries,
-        total: response.total,
-        offset: response.entries.length,
-        hasMore: response.entries.length > 0 && response.entries.length < response.total,
+        entries: accumulatedEntries,
+        total,
+        offset: nextOffset,
+        hasMore: nextOffset < total,
         isLoading: false,
         isRefetching: false,
       });
@@ -246,54 +269,81 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
   // Fetch more entries (pagination)
   fetchMoreEntries: async () => {
-    const requestId = ++latestEntriesRequestId;
-    const { status, feedId, categoryId, starred, searchQuery, limit, offset, hasMore, isLoadingMore, mediaType } = get();
+    const { status, feedId, categoryId, starred, searchQuery, limit, offset, hasMore, isLoadingMore, mediaType, entries } = get();
+    const filterSnapshot: ClientFilterSnapshot = { feedId, categoryId, mediaType };
 
     if (!hasMore || isLoadingMore) return;
+
+    const requestId = ++latestEntriesRequestId;
 
     set({ isLoadingMore: true });
 
     try {
       // Use higher limit for media types since they're filtered client-side
       const effectiveLimit = (mediaType === 'audio' || mediaType === 'video' || mediaType === 'magazines') ? 500 : limit;
-      
-      const params: EntryQueryParams = {
+      const baseParams: EntryQueryParams = {
         limit: effectiveLimit,
-        offset,
         order: 'published_at',
         direction: 'desc',
       };
 
       if (status !== 'all') {
-        params.status = status;
+        baseParams.status = status;
       }
       if (starred) {
-        params.starred = true;
+        baseParams.starred = true;
       }
       if (searchQuery) {
-        params.search = searchQuery;
+        baseParams.search = searchQuery;
       }
       if (categoryId) {
-        params.category_id = categoryId;
+        baseParams.category_id = categoryId;
       }
 
-      let response;
-      if (feedId) {
-        response = await api.getFeedEntries(feedId, params);
-      } else if (categoryId) {
-        response = await api.getCategoryEntries(categoryId, params);
-      } else {
-        response = await api.getEntries(params);
-      }
+      const fetchPage = async (pageOffset: number) => {
+        const params: EntryQueryParams = { ...baseParams, offset: pageOffset };
 
-      if (requestId !== latestEntriesRequestId) {
-        return;
+        if (feedId) {
+          return api.getFeedEntries(feedId, params);
+        }
+        if (categoryId) {
+          return api.getCategoryEntries(categoryId, params);
+        }
+        return api.getEntries(params);
+      };
+
+      const visibleBeforeCount = applyClientSideFilters(entries, filterSnapshot).length;
+      let accumulatedEntries: Entry[] = [];
+      let total = offset;
+      let nextOffset = offset;
+
+      while (true) {
+        const response = await fetchPage(nextOffset);
+
+        if (requestId !== latestEntriesRequestId) {
+          return;
+        }
+
+        accumulatedEntries = [...accumulatedEntries, ...response.entries];
+        total = response.total;
+        nextOffset += response.entries.length;
+
+        const visibleAfterCount = applyClientSideFilters([...entries, ...accumulatedEntries], filterSnapshot).length;
+        const gainedVisibleEntries = visibleAfterCount > visibleBeforeCount;
+        const shouldContinue = usesClientSideFilteredPagination(filterSnapshot)
+          && response.entries.length > 0
+          && nextOffset < total
+          && !gainedVisibleEntries;
+
+        if (!shouldContinue) {
+          break;
+        }
       }
 
       set((state) => ({
-        entries: [...state.entries, ...response.entries],
-        offset: state.offset + response.entries.length,
-        hasMore: response.entries.length > 0 && state.offset + response.entries.length < response.total,
+        entries: [...state.entries, ...accumulatedEntries],
+        offset: nextOffset,
+        hasMore: nextOffset < total,
         isLoadingMore: false,
       }));
     } catch (error) {

@@ -99,6 +99,7 @@ interface EntryListProps {
   entries: Entry[];
   selectedEntry?: Entry | null;
   isLoading: boolean;
+  isLoadingMore?: boolean;
   isRefetching?: boolean;
   hasMore: boolean;
   title?: string;
@@ -746,6 +747,7 @@ interface VirtualizedMasonryProps {
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   hasMore: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
   onLoadMore: () => void;
 }
 
@@ -757,6 +759,7 @@ function VirtualizedMasonry({
   scrollContainerRef,
   hasMore,
   isLoading,
+  isLoadingMore,
   onLoadMore,
 }: VirtualizedMasonryProps) {
   const { currentBreakpoint } = useBreakpoint(masonryBreakpoints);
@@ -831,7 +834,7 @@ function VirtualizedMasonry({
 
   // Use IntersectionObserver for reliable load-more detection
   useEffect(() => {
-    if (!hasMore || isLoading) return;
+    if (!hasMore || isLoading || isLoadingMore) return;
     
     const observer = new IntersectionObserver(
       (entries) => {
@@ -847,7 +850,7 @@ function VirtualizedMasonry({
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoading, onLoadMore, scrollContainerRef]);
+  }, [hasMore, isLoading, isLoadingMore, onLoadMore, scrollContainerRef]);
 
   // Calculate column width percentage
   const columnWidth = 100 / lanes;
@@ -905,15 +908,6 @@ function VirtualizedMasonry({
         )}
       </div>
       
-      {/* Loading indicator at bottom */}
-      {hasMore && isLoading && (
-        <div className="py-6 flex items-center justify-center">
-          <div className="flex items-center gap-2 text-sm text-[var(--color-text-tertiary)]">
-            <RefreshCw className="animate-spin" size={14} />
-            <span>Loading more...</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -923,6 +917,7 @@ export function EntryList({
   entries,
   selectedEntry,
   isLoading,
+  isLoadingMore = false,
   isRefetching,
   hasMore,
   title,
@@ -960,7 +955,7 @@ export function EntryList({
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
-    if (!hasMore || isLoading) return;
+    if (viewMode === 'magazine' || !hasMore || isLoading || isLoadingMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -976,7 +971,7 @@ export function EntryList({
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoading, onLoadMore]);
+  }, [viewMode, hasMore, isLoading, isLoadingMore, onLoadMore]);
 
   // Scroll to selected entry when it changes (not for magazine view)
   useEffect(() => {
@@ -1035,6 +1030,7 @@ export function EntryList({
           scrollContainerRef={listRef}
           hasMore={hasMore}
           isLoading={isLoading}
+          isLoadingMore={isLoadingMore}
           onLoadMore={onLoadMore}
         />
       );
@@ -1124,12 +1120,12 @@ export function EntryList({
             {renderEntries()}
             
             {/* Load More Trigger */}
-            {hasMore && (
+            {hasMore && viewMode !== 'magazine' && (
               <div 
                 ref={loadMoreRef}
                 className="py-6 flex items-center justify-center"
               >
-                {isLoading ? (
+                {isLoadingMore ? (
                   <div className="flex items-center gap-2 text-sm text-[var(--color-text-tertiary)]">
                     <RefreshCw className="animate-spin" size={14} />
                     <span>Loading more...</span>
