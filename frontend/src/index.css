@@ -126,6 +126,11 @@ html.theme-eink .eink-modal-surface-secondary {
   transform: none !important;
 }
 
+html.theme-eink .eink-modal-surface,
+html.theme-eink .eink-modal-surface-secondary {
+  border: 1px solid var(--color-border-default) !important;
+}
+
 html.theme-eink .eink-header-button:hover {
   background: var(--color-surface-hover) !important;
 }
