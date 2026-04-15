@@ -46,6 +46,7 @@ function HomePage() {
     fetchEntries, 
     fetchMoreEntries,
     hasMore,
+    isLoadingMore,
     setFilter,
     selectEntry,
     markAsRead,
@@ -551,7 +552,7 @@ function HomePage() {
             <EntryList
               entries={filteredEntries}
               selectedEntry={selectedEntry}
-              isLoading={isLoading}
+              isLoading={isLoading || isLoadingMore}
               isRefetching={isRefetching}
               hasMore={hasMore}
               title={getViewTitle()}

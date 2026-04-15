@@ -220,7 +220,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         entries: response.entries,
         total: response.total,
         offset: response.entries.length,
-        hasMore: response.entries.length < response.total,
+        hasMore: response.entries.length > 0 && response.entries.length < response.total,
         isLoading: false,
         isRefetching: false,
       });
@@ -293,7 +293,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       set((state) => ({
         entries: [...state.entries, ...response.entries],
         offset: state.offset + response.entries.length,
-        hasMore: state.offset + response.entries.length < response.total,
+        hasMore: response.entries.length > 0 && state.offset + response.entries.length < response.total,
         isLoadingMore: false,
       }));
     } catch (error) {
