@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
-  X, Highlighter, Sun, Moon, Monitor, Type, List, Loader2, BookOpen, FileText,
+  X, Sun, Moon, Monitor, Type, List, Loader2,
   Clock, Download, CloudOff, Check,
 } from 'lucide-react';
 import { api } from '@/api/client';
@@ -36,7 +36,10 @@ import {
   ReaderNavButtons,
   ReaderProgressBar,
   SyncPositionToast,
+  useAutoHideControls,
 } from '@/components/reader';
+import { useEinkWorkTag, useReaderWakeHandlers } from '@/components/reader/useEinkReaderLifecycle';
+import { getTapZoneAction } from '@/components/reader/tap-zones';
 import { useRemoteProgressSync } from '@/hooks/useRemoteProgressSync';
 import { TypographyPanel, DEFAULT_TYPOGRAPHY } from '@/components/reader/TypographyPanel';
 import type { TypographySettings } from '@/components/reader/TypographyPanel';
@@ -45,6 +48,7 @@ import { useOfflineRegistry } from '@/stores/offline';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { EPUB_FONT_FACE_CSS, getEpubFontStack, normalizeEpubFontValue } from '@/lib/epub-fonts';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
+import { einkPower } from '@/services/eink-power';
 
 type ReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
 const APP_THEME_ORDER = ['light', 'system', 'dark'] as const;
@@ -159,14 +163,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationsReadyRef = useRef(false);
   const isAnimatingRef = useRef(false);
+  const nextAttemptInProgressRef = useRef(false);
+  const prevAttemptInProgressRef = useRef(false);
   const currentBookDataRef = useRef<Uint8Array | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
   const manualSpreadPreferenceRef = useRef(false);
 
+  const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `epub:${book.id}` });
+
   // Actions (stable references — won't cause re-renders)
   const updateProgress = useBooksStore(s => s.updateProgress);
   const syncProgress = useBooksStore(s => s.syncProgress);
-  const addHighlight = useBooksStore(s => s.addHighlight);
   const highlights = useBooksStore(s => s.highlights);
 
   // Snapshot initial progress at mount — read once, not reactive,
@@ -189,6 +196,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const [chapter, setChapter] = useState(initialProgress.chapter);
   const [percentage, setPercentage] = useState(initialProgress.percentage);
   const [showControls, setShowControls] = useState(true);
+  const showControlsRef = useRef(showControls);
+  useEffect(() => { showControlsRef.current = showControls; }, [showControls]);
 
   // --- Spread mode ---
   const [isSpreadView, setIsSpreadView] = useState(false);
@@ -230,6 +239,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   // --- Auto-hide toolbar ---
   const [controlsTick, setControlsTick] = useState(0);
+
+  useAutoHideControls(showControls, setShowControls, showToc || showTypography || isLoading);
 
   // --- Progress tracking for remote sync ---
   const chapterRef = useRef(initialProgress.chapter);
@@ -294,9 +305,23 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   useEffect(() => {
     if (!manualSpreadPreferenceRef.current) {
+      const cols: 1 | 2 = isLandscapeViewport ? 2 : 1;
       setIsSpreadView(isLandscapeViewport);
+      setTypography(prev => ({ ...prev, columnCount: cols }));
     }
   }, [isLandscapeViewport]);
+
+  // On E-ink, wake the device briefly on orientation change so the screen
+  // can reflow and repaint at the new orientation before re-hibernating.
+  // finishEinkWork(true) is triggered automatically by the relocated handler
+  // after epub.js re-renders; the safety timeout covers cases where a spread
+  // change is not triggered (manual spread preference).
+  useEffect(() => {
+    if (!einkMode) return;
+    startEinkWork('orientation');
+    const safety = setTimeout(() => { void finishEinkWork(true); }, 3000);
+    return () => clearTimeout(safety);
+  }, [isLandscapeViewport, einkMode, startEinkWork, finishEinkWork]);
 
   const remoteSync = useRemoteProgressSync({
     enabled: !isLoading && locationsReady,
@@ -338,21 +363,50 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // Navigation callbacks with animation guard to prevent double-fire
   const nextPage = useCallback(() => {
     if (!renditionRef.current || !canGoNext || isAnimatingRef.current) return;
+    if (nextAttemptInProgressRef.current) return;
+
+    nextAttemptInProgressRef.current = true;
+    startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-left', () => {
-      renditionRef.current?.next();
+      renditionRef.current?.next().finally(() => {
+        nextAttemptInProgressRef.current = false;
+      });
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoNext, animatePageTurn]);
+  }, [canGoNext, animatePageTurn, startEinkWork]);
 
   const prevPage = useCallback(() => {
     if (!renditionRef.current || !canGoPrev || isAnimatingRef.current) return;
+    if (prevAttemptInProgressRef.current) return;
+
+    prevAttemptInProgressRef.current = true;
+    startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-right', () => {
-      renditionRef.current?.prev();
+      renditionRef.current?.prev().finally(() => {
+        prevAttemptInProgressRef.current = false;
+      });
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoPrev, animatePageTurn]);
+  }, [canGoPrev, animatePageTurn, startEinkWork]);
+
+  // Instant variants for keyboard/hardware-button navigation — no animation delay.
+  // Keyboard nav never has a visible slide (the user pressed a key, not swiped),
+  // so waiting 200ms for the exit animation before calling next()/prev() is pure delay.
+  const nextPageInstant = useCallback(() => {
+    if (!renditionRef.current || !canGoNext || nextAttemptInProgressRef.current) return;
+    nextAttemptInProgressRef.current = true;
+    startEinkWork('page-turn');
+    renditionRef.current.next().finally(() => { nextAttemptInProgressRef.current = false; });
+  }, [canGoNext, startEinkWork]);
+
+  const prevPageInstant = useCallback(() => {
+    if (!renditionRef.current || !canGoPrev || prevAttemptInProgressRef.current) return;
+    prevAttemptInProgressRef.current = true;
+    startEinkWork('page-turn');
+    renditionRef.current.prev().finally(() => { prevAttemptInProgressRef.current = false; });
+  }, [canGoPrev, startEinkWork]);
 
   // Refs to keep callbacks fresh for iframe event handlers
   const nextPageRef = useRef(nextPage);
@@ -369,29 +423,78 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // Guard to prevent double-toggle when touch tap fires followed by synthesized click
   const touchTapRef = useRef(false);
 
+  // Shared controls toggle used by both the gesture hook and the iframe handlers
+  const toggleControlsRef = useRef<() => void>(() => {});
+  const toggleControls = useCallback(() => {
+    const nextShowing = !showControlsRef.current;
+    if (!nextShowing) {
+      einkPower.setDeferHibernation(true);
+      setShowControls(false);
+      setShowToc(false);
+      setShowTypography(false);
+      setTimeout(() => { einkPower.setDeferHibernation(false); }, 500);
+    } else {
+      setShowControls(true);
+      setShowToc(false);
+      setShowTypography(false);
+    }
+  }, []);
+  toggleControlsRef.current = toggleControls;
+
   const gestures = useReaderGestures(
-    { nextPage, prevPage, canGoNext, canGoPrev },
+    { nextPage, prevPage, canGoNext, canGoPrev, onToggleControls: toggleControls },
     {
       scale,
       setScale,
       enableZoom: false, // EPUB handles text scaling via typography panel
-      enableClickZones: false,
+      enableClickZones: false, // tap zones are handled inside the iframe document
     },
   );
 
   const keyboardCallbacks = useMemo(() => ({
-    nextPage,
-    prevPage,
+    nextPage: nextPageInstant,
+    prevPage: prevPageInstant,
     onClose,
-  }), [nextPage, prevPage, onClose]);
+  }), [nextPageInstant, prevPageInstant, onClose]);
 
   useReaderKeyboard(keyboardCallbacks);
+
+  useReaderWakeHandlers(nextPageInstant, prevPageInstant);
+
+  useEffect(() => {
+    einkPower.setSurface({
+      mode: 'epub-reader',
+      eligible: !isLoading && !loadError && !showControls && !showToc && !showTypography,
+      reason: loadError
+        ? 'epub-load-error'
+        : isLoading
+          ? 'epub-loading'
+          : showToc
+            ? 'epub-toc-visible'
+            : showTypography
+              ? 'epub-typography-visible'
+              : showControls
+                ? 'epub-controls-visible'
+                : undefined,
+      gestureModel: 'paginated',
+    });
+
+    return () => {
+      einkPower.setSurface({
+        mode: 'none',
+        eligible: false,
+        reason: 'epub-reader-closed',
+        gestureModel: 'none',
+      });
+    };
+  }, [isLoading, loadError, showControls, showToc, showTypography]);
 
   // === EPUB initialization ===
 
   useEffect(() => {
     if (!viewerRef.current) return;
     let cancelled = false;
+    startEinkWork('init');
 
     const init = async () => {
       try {
@@ -404,7 +507,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
         let arrayBuffer: ArrayBuffer;
         if (sessionBook) {
-          arrayBuffer = sessionBook.buffer.slice(sessionBook.byteOffset, sessionBook.byteOffset + sessionBook.byteLength);
+          arrayBuffer = sessionBook.slice().buffer;
         } else {
           const cached = await getCachedBlob(cacheKey);
           if (cached) {
@@ -551,6 +654,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
               syncProgress(book.id).catch(() => {});
             }, 1500);
           }
+
+          void finishEinkWork(true);
         });
 
         // Click and keyboard events are handled directly on the iframe
@@ -580,11 +685,6 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           const docEl = doc.documentElement;
           if (docEl) docEl.style.touchAction = 'manipulation';
           if (doc.body) doc.body.style.touchAction = 'manipulation';
-
-          const iframe = viewerRef.current?.querySelector('iframe');
-          if (iframe) {
-            iframe.style.touchAction = 'manipulation';
-          }
 
           let startX = 0, startY = 0, startTime = 0;
           let touchMoved = false;
@@ -619,13 +719,22 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             const absDx = Math.abs(dx);
             const absDy = Math.abs(dy);
 
-            // Tap detection: minimal movement + short duration → toggle controls
+            // Tap detection: minimal movement + short duration
             if (!touchMoved && absDx < 10 && absDy < 10 && dt < 500) {
               touchTapRef.current = true;
               setTimeout(() => { touchTapRef.current = false; }, 400);
-              setShowControls((prev) => !prev);
-              setShowToc(false);
-              setShowTypography(false);
+
+              // Convert iframe-local clientX to outer-document X so that tap zones
+              // are based on the FULL SCREEN position (critical in spread mode where
+              // each iframe starts at a non-zero left offset in the outer document).
+              const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
+              const iframeLeft = iframeEl ? iframeEl.getBoundingClientRect().left : 0;
+              const outerX = touch.clientX + iframeLeft;
+              const action = getTapZoneAction(outerX, { left: 0, width: window.innerWidth });
+
+              if (action === 'prev') prevPageRef.current();
+              else if (action === 'next') nextPageRef.current();
+              else toggleControlsRef.current();
               return;
             }
 
@@ -671,22 +780,52 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           // phase so it fires before epubjs's own listener. This replaces
           // rendition.on('click') which doesn't fire in Safari due to
           // sandboxed-iframe mouse-event suppression.
-          doc.addEventListener('click', () => {
+          doc.addEventListener('click', (e: MouseEvent) => {
             if (touchTapRef.current) return;
-            setShowControls((prev) => !prev);
-            setShowToc(false);
-            setShowTypography(false);
+
+            // Convert iframe-local clientX to outer-document X so that tap zones
+            // are based on the FULL SCREEN position (critical in spread mode).
+            const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
+            const iframeLeft = iframeEl ? iframeEl.getBoundingClientRect().left : 0;
+            const outerX = e.clientX + iframeLeft;
+            const action = getTapZoneAction(outerX, { left: 0, width: window.innerWidth });
+
+            if (action === 'prev') prevPageRef.current();
+            else if (action === 'next') nextPageRef.current();
+            else toggleControlsRef.current();
           }, true);
 
           // Direct keydown handler on iframe document. Forwards keyboard
           // events to the parent window so useReaderKeyboard can pick
           // them up (iframe events don't propagate to the parent).
+          // Runs in capture phase so it fires before any epub.js handlers.
           doc.addEventListener('keydown', (e: KeyboardEvent) => {
+            // Forward all key properties, including the legacy keyCode/which
+            // fields that some E-ink hardware buttons only populate.
             window.dispatchEvent(new KeyboardEvent('keydown', {
               key: e.key,
               code: e.code,
+              keyCode: e.keyCode,
+              which: e.which,
               bubbles: true,
+              cancelable: true,
             }));
+
+            // Prevent default browser behavior (e.g. arrow-key scrolling) and
+            // stop other iframe handlers (epub.js) from seeing navigation keys.
+            // This avoids spurious layout/scroll work before the page turn fires.
+            const isNavKey = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+              || e.key === 'ArrowUp' || e.key === 'ArrowDown'
+              || e.key === 'PageUp' || e.key === 'PageDown'
+              || e.key === ' '
+              || e.key === 'AudioVolumeDown' || e.key === 'AudioVolumeUp'
+              || e.code === 'VolumeDown' || e.code === 'VolumeUp'
+              || e.keyCode === 24 || e.keyCode === 25
+              || e.keyCode === 174 || e.keyCode === 175;
+            if (isNavKey) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
           }, true);
         });
 
@@ -722,6 +861,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           console.error('[epub] Failed to load book:', err);
           setLoadError(err?.message || 'Failed to load book');
           setIsLoading(false);
+          void finishEinkWork(false);
         }
       }
     };
@@ -733,6 +873,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
       if (restoreFrameRef.current != null) cancelAnimationFrame(restoreFrameRef.current);
       syncProgress(book.id).catch(() => {});
+      void finishEinkWork(false);
       if (epubRef.current) epubRef.current.destroy();
       epubRef.current = null;
       renditionRef.current = null;
@@ -740,24 +881,26 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       setLocationsReady(false);
       currentBookDataRef.current = null;
     };
-  }, [book.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [book.id, finishEinkWork, startEinkWork]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === Update spread mode ===
   useEffect(() => {
     if (renditionRef.current) {
+      startEinkWork('spread');
       (renditionRef.current as any).spread(isSpreadView ? 'auto' : 'none');
       queueRestoreToCfi();
     }
-  }, [isSpreadView, queueRestoreToCfi]);
+  }, [isSpreadView, queueRestoreToCfi, startEinkWork]);
 
   // === Update theme/typography when settings change ===
   useEffect(() => {
     if (renditionRef.current) {
+      startEinkWork('theme');
       const rendition = renditionRef.current;
       applyThemeAndTypography(rendition, readerTheme, typography);
       queueRestoreToCfi();
     }
-  }, [readerTheme, typography, queueRestoreToCfi]);
+  }, [readerTheme, typography, queueRestoreToCfi, startEinkWork]);
 
   // === Save typography to localStorage ===
   useEffect(() => {
@@ -769,56 +912,25 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     if (!showControls || showToc || showTypography) return;
     const timer = setTimeout(() => {
       setShowControls(false);
-      // Restore focus to epub iframe so keyboard shortcuts continue working
-      try {
-        const iframe = viewerRef.current?.querySelector('iframe');
-        if (iframe?.contentWindow) iframe.contentWindow.focus();
-      } catch { /* cross-origin */ }
     }, 4000);
     return () => clearTimeout(timer);
   }, [showControls, showToc, showTypography, controlsTick]);
 
   // === TOC navigation ===
   const goToTocItem = useCallback((href: string) => {
+    startEinkWork('toc');
     renditionRef.current?.display(href);
     setShowToc(false);
-  }, []);
+  }, [startEinkWork]);
 
-  // === Toggle spread ===
-  const toggleSpreadView = useCallback(() => {
-    manualSpreadPreferenceRef.current = true;
-    setIsSpreadView((prev) => !prev);
-  }, []);
-
-  // === Highlight ===
-  const handleAddHighlight = useCallback(async () => {
-    const rendition = renditionRef.current;
-    if (!rendition) return;
-
-    const contents = rendition.getContents();
-    for (const content of contents as unknown as Contents[]) {
-      const selection = content.window?.getSelection();
-      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-        const text = selection.toString().trim();
-        if (!text) continue;
-        try {
-          const loc = rendition.currentLocation() as any;
-          const cfiRange = loc?.start?.cfi || loc?.cfi || '';
-          if (cfiRange) {
-            await addHighlight(book.id, { cfi_range: cfiRange, text, color: 'yellow' });
-            rendition.annotations.add(
-              'highlight', cfiRange, {}, undefined, 'hl',
-              { fill: 'rgba(255, 223, 0, 0.3)', 'fill-opacity': '0.3', 'mix-blend-mode': 'multiply' },
-            );
-          }
-        } catch (err) {
-          console.error('[epub-reader] Failed to add highlight:', err);
-        }
-        selection.removeAllRanges();
-        break;
-      }
+  // When the user changes columnCount in the typography panel, sync to spread view
+  const handleTypographyChange = useCallback((newSettings: TypographySettings) => {
+    if (newSettings.columnCount !== typography.columnCount) {
+      manualSpreadPreferenceRef.current = true;
+      setIsSpreadView(newSettings.columnCount === 2);
     }
-  }, [book.id, addHighlight]);
+    setTypography(newSettings);
+  }, [typography.columnCount]);
 
   // === Handle slider position change ===
   const handlePositionChange = useCallback((pos: number) => {
@@ -826,9 +938,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     const locations = epubRef.current.locations as any;
     const cfi = locations.cfiFromLocation(pos);
     if (cfi) {
+      startEinkWork('seek');
       renditionRef.current?.display(cfi);
     }
-  }, []);
+  }, [startEinkWork]);
 
   // === Download EPUB ===
   const handleDownload = useCallback(async () => {
@@ -965,20 +1078,6 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0" onPointerDown={() => setControlsTick(t => t + 1)}>
-            {/* Spread toggle */}
-            <button
-              onClick={toggleSpreadView}
-              className={cn(
-                'p-2 rounded-lg transition-colors',
-                isSpreadView
-                  ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
-                  : 'hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]',
-              )}
-              title={isSpreadView ? 'Single page' : 'Side-by-side spread'}
-            >
-              {isSpreadView ? <BookOpen size={18} /> : <FileText size={18} />}
-            </button>
-
             {/* TOC */}
             <button
               onClick={() => { setShowToc((p) => !p); setShowTypography(false); }}
@@ -1005,15 +1104,6 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
               title="Typography settings"
             >
               <Type size={18} />
-            </button>
-
-            {/* Highlight */}
-            <button
-              onClick={handleAddHighlight}
-              className="p-2 rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
-              title="Highlight selection"
-            >
-              <Highlighter size={18} className="text-[var(--color-text-secondary)]" />
             </button>
 
             {/* Download EPUB */}
@@ -1100,10 +1190,13 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           <div className="fixed inset-0 z-30" onClick={() => setShowTypography(false)} />
           <TypographyPanel
             settings={typography}
-            onChange={setTypography}
+            onChange={handleTypographyChange}
             onClose={() => setShowTypography(false)}
             isDarkMode={isReaderDark}
             topOffset={overlayTopOffset}
+            showReadingModeControl={false}
+            alwaysShowColumns={true}
+            maxPaginatedColumns={2}
           />
         </>
       )}

@@ -7,6 +7,7 @@
  * - Keyboard navigation
  * - Navigation buttons
  * - Progress bar
+ * - E-ink power lifecycle management
  */
 
 export { useReaderGestures } from './useReaderGestures';
@@ -17,6 +18,9 @@ export type { PageTransition, ReaderAnimationState } from './useReaderAnimation'
 
 export { useReaderKeyboard } from './useReaderKeyboard';
 export type { ReaderKeyboardCallbacks } from './useReaderKeyboard';
+
+export { useEinkWorkTag, useReaderWakeHandlers, useAutoHideControls } from './useEinkReaderLifecycle';
+export { usePaginationWheel } from './usePaginationWheel';
 
 export { ReaderNavButtons } from './ReaderNavButtons';
 export { ReaderProgressBar } from './ReaderProgressBar';

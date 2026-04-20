@@ -5,6 +5,8 @@ export interface TypographySettings {
   fontSize: number;
   lineHeight: number;
   maxWidth: number;
+  columnCount: 1 | 2;
+  readingMode: 'scroll' | 'paginated';
   margin: number;
   verticalMargin: number;
   paragraphSpacing: number;
@@ -18,6 +20,8 @@ export const DEFAULT_TYPOGRAPHY: TypographySettings = {
   fontSize: 100,
   lineHeight: 1.7,
   maxWidth: 768,
+  columnCount: 1,
+  readingMode: 'scroll',
   margin: 40,
   verticalMargin: 20,
   paragraphSpacing: 1,
@@ -31,6 +35,8 @@ export const DEFAULT_ARTICLE_TYPOGRAPHY: TypographySettings = {
   fontSize: 100,
   lineHeight: 1.7,
   maxWidth: 768,
+  columnCount: 2,
+  readingMode: 'scroll',
   margin: 0,
   verticalMargin: 0,
   paragraphSpacing: 1,
@@ -60,10 +66,15 @@ export function normalizeTypographySettingsWithDefaults(
     ...settings,
   };
 
+  const readingMode = nextSettings.readingMode === 'paginated' ? 'paginated' : 'scroll';
+  const columnCount = readingMode === 'paginated' && nextSettings.columnCount === 2 ? 2 : 1;
+
   return {
     ...nextSettings,
     fontFamily: normalizeEpubFontValue(nextSettings.fontFamily),
     maxWidth: Math.min(1440, Math.max(480, nextSettings.maxWidth)),
+    columnCount,
+    readingMode,
     textAlign: nextSettings.textAlign === 'justify' || nextSettings.textAlign === 'original'
       ? nextSettings.textAlign
       : 'left',

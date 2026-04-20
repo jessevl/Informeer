@@ -1,12 +1,12 @@
 /**
  * ArticleContent Component
  * Shared article content rendering used by both ArticleReader and ArticleModal
- * Handles cover images, YouTube videos, audio/video enclosures, and prose content
+ * Handles reader media, article metadata, and prose content
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { cn, formatRelativeTime, formatReadingTime, isYouTubeUrl, extractYouTubeId, extractFirstImage, sanitizeArticleHtml, stripYouTubeEmbeds } from '@/lib/utils';
-import { ExternalLink, Play, ListPlus, Loader2 } from 'lucide-react';
+import { cn, formatRelativeTime, formatReadingTime, isYouTubeUrl, extractYouTubeId, sanitizeArticleHtml, stripYouTubeEmbeds } from '@/lib/utils';
+import { Play, ListPlus, Loader2, AlertTriangle, RotateCcw } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { FeedIcon } from '@/components/feeds/FeedIcon';
 import { PlayButton } from '@/components/player/PlayButton';
@@ -22,39 +22,24 @@ import { getTypographyFontFamily, isOriginalTypography } from '@/lib/typography'
 import type { CSSProperties } from 'react';
 
 const ARTICLE_FONT_STYLE_ID = 'informeer-article-font-faces';
+const PAGINATED_HEADER_OFFSET = 'calc(3.5rem + env(safe-area-inset-top, 0px))';
+const PAGINATED_BOTTOM_MARGIN = 'calc(2.5rem + env(safe-area-inset-bottom, 0px))';
 
 interface ArticleContentProps {
   entry: Entry;
-  showCoverImage?: boolean;
-  showFooter?: boolean;
+  effectiveColumnCount?: 1 | 2;
+  paginatedTrailingBlankColumns?: number;
   // Controlled reader view props - when provided, ArticleContent won't manage its own state
   isReaderViewControlled?: boolean;
   isLoadingReaderControlled?: boolean;
   readerContentControlled?: string | null;
   onToggleReaderViewControlled?: () => void;
   fetchError?: string | null;
+  onRetryFetch?: () => void;
   // Deprecated - kept for backward compatibility
   showReaderViewToggle?: boolean;
   onReaderViewToggle?: (isReaderView: boolean) => void;
   className?: string;
-}
-
-// Page Hero Component - Notion-style cover image that extends under header
-function PageHero({ imageUrl }: { imageUrl: string }) {
-  return (
-    <div className="relative w-full h-56 md:h-72 -mt-14 overflow-hidden">
-      <img 
-        src={imageUrl} 
-        alt="" 
-        className="w-full h-full object-cover"
-        loading="eager"
-      />
-      {/* Top gradient for header readability */}
-      <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/40 to-transparent" />
-      {/* Bottom gradient for content transition */}
-      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[var(--color-surface-base)] to-transparent" />
-    </div>
-  );
 }
 
 // YouTube Video Trigger Component
@@ -114,14 +99,15 @@ function YouTubeVideoTrigger({ entry, youtubeId }: { entry: Entry; youtubeId: st
 
 export function ArticleContent({
   entry,
-  showCoverImage = true,
-  showFooter = true,
+  effectiveColumnCount,
+  paginatedTrailingBlankColumns = 0,
   // Controlled reader view props
   isReaderViewControlled,
   isLoadingReaderControlled,
   readerContentControlled,
   onToggleReaderViewControlled,
   fetchError,
+  onRetryFetch,
   // Deprecated props
   showReaderViewToggle = false,
   onReaderViewToggle,
@@ -129,8 +115,8 @@ export function ArticleContent({
 }: ArticleContentProps) {
   const { play: playVideo, currentEntry: currentVideoEntry } = useVideoStore();
   const { addVideoToQueue, isVideoQueued } = useMediaQueueStore();
-  const showArticleImages = useSettingsStore((s) => s.showArticleImages);
   const articleTypography = useSettingsStore((s) => s.articleTypography);
+  const resolvedColumnCount = effectiveColumnCount ?? articleTypography.columnCount;
   
   // Per-feed content fetch policy
   const feedPolicy = entry.feed?.content_fetch_policy || 'rss_only';
@@ -219,11 +205,8 @@ export function ArticleContent({
   // Use reader content if active, otherwise original
   const displayContent = isReaderView && readerContent ? readerContent : originalContent;
   
-  // Strip social-share widgets and icon blocks before extracting the cover or rendering HTML.
+  // Strip social-share widgets and icon blocks before rendering HTML.
   let articleContent = sanitizeArticleHtml(displayContent);
-  
-  // Extract cover image from sanitized content
-  const coverImage = showArticleImages && showCoverImage ? extractFirstImage(articleContent) : null;
   
   // Always strip YouTube embeds and detect embedded videos
   const { html: strippedContent, youtubeIds: embeddedYouTubeIds } = stripYouTubeEmbeds(articleContent);
@@ -268,12 +251,21 @@ export function ArticleContent({
 
   const originalTypography = isOriginalTypography(articleTypography);
   const contentFontFamily = getTypographyFontFamily(articleTypography.fontFamily);
+  const isPaginated = articleTypography.readingMode === 'paginated';
+  const columnGapPx = 40;
   const articleTitleStyle: CSSProperties | undefined = contentFontFamily
     ? { fontFamily: contentFontFamily }
     : undefined;
-  const articleLayoutStyle: CSSProperties = {
-    maxWidth: `${articleTypography.maxWidth}px`,
-  };
+  const articleLayoutStyle: CSSProperties = isPaginated
+    ? {
+        maxWidth: 'none',
+        width: '100%',
+        flex: 1,
+        minHeight: 0,
+      }
+    : {
+        maxWidth: `${articleTypography.maxWidth}px`,
+      };
   const articleBodyStyle: CSSProperties | undefined = originalTypography
     ? undefined
     : {
@@ -285,14 +277,86 @@ export function ArticleContent({
           : articleTypography.textAlign as CSSProperties['textAlign'],
         hyphens: articleTypography.hyphenation ? 'auto' : 'manual',
       };
+  const articleFlowStyle: CSSProperties | undefined = isPaginated
+    ? {
+        columnWidth: resolvedColumnCount === 2
+          ? `calc((var(--article-page-width, 100vw) - ${columnGapPx}px) / 2)`
+          : `var(--article-page-width, 100vw)`,
+        columnGap: `${columnGapPx}px`,
+        columnFill: 'auto',
+        height: '100%',
+        maxWidth: 'none',
+        boxSizing: 'border-box',
+        paddingRight: 'var(--article-page-trailing-px-spacer, 0px)',
+        paddingTop: PAGINATED_HEADER_OFFSET,
+        paddingBottom: PAGINATED_BOTTOM_MARGIN,
+      }
+    : undefined;
   const articleTypographyCss = originalTypography
     ? ''
     : `
+      .informeer-article-typography {
+        column-gap: ${columnGapPx}px;
+      }
+
       .informeer-article-typography p {
         margin-top: 0;
         margin-bottom: ${articleTypography.paragraphSpacing}em;
         line-height: ${articleTypography.lineHeight} !important;
       }
+
+      .informeer-article-typography h1,
+      .informeer-article-typography h2,
+      .informeer-article-typography h3,
+      .informeer-article-typography h4,
+      .informeer-article-typography h5,
+      .informeer-article-typography h6,
+      .informeer-article-typography blockquote,
+      .informeer-article-typography ul,
+      .informeer-article-typography ol {
+        break-inside: avoid;
+      }
+
+      .informeer-article-typography table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+
+      .informeer-article-typography tr {
+        break-inside: avoid;
+      }
+
+      .informeer-article-typography pre {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+
+      .informeer-article-typography img,
+      .informeer-article-typography figure {
+        break-inside: ${resolvedColumnCount === 2 ? 'auto' : 'avoid'};
+      }
+      ${resolvedColumnCount === 2 && isPaginated ? `
+      .informeer-article-typography img {
+        max-height: 45vh;
+        object-fit: contain;
+        object-position: left top;
+        width: auto;
+        max-width: 100%;
+      }
+
+      .informeer-article-typography figure {
+        break-inside: avoid;
+      }
+
+      .informeer-article-typography figure img {
+        max-height: 40vh;
+        object-fit: contain;
+        object-position: left top;
+        width: auto;
+        max-width: 100%;
+      }
+      ` : ''}
 
       .informeer-article-typography ul,
       .informeer-article-typography ol,
@@ -317,95 +381,77 @@ export function ArticleContent({
         line-height: ${articleTypography.lineHeight} !important;
       }
     `;
-
-  return (
-    <>
-      {articleTypographyCss && <style>{articleTypographyCss}</style>}
-      {/* Page Hero Cover Image - extends under header */}
-      {coverImage && !effectiveYouTubeId && (
-        <PageHero imageUrl={coverImage} />
-      )}
-      
-      {/* Spacer when no cover image */}
-      {(!coverImage || effectiveYouTubeId) && <div className="h-14" />}
-      
-      <div className={cn(
-        "mx-auto px-6",
-        coverImage && !effectiveYouTubeId ? "-mt-8 relative z-10" : "py-8",
-        className
-      )}
-        style={articleLayoutStyle}
+  const avoidColumnBreakStyle: CSSProperties | undefined = isPaginated
+    ? { breakInside: 'avoid-column' }
+    : undefined;
+  const articleHeader = (
+    <header className="mb-8" style={avoidColumnBreakStyle}>
+      <h1
+        className="text-2xl sm:text-3xl font-bold text-[var(--color-text-primary)] leading-tight"
+        style={articleTitleStyle}
       >
-        {/* Article Title */}
-        <header className="mb-8">
-          <h1
-            className="text-2xl sm:text-3xl font-bold text-[var(--color-text-primary)] leading-tight"
-            style={articleTitleStyle}
-          >
-            {entry.title}
-          </h1>
-          
-          {/* Meta row with feed icon */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-4 text-sm text-[var(--color-text-secondary)]">
-            <FeedIcon 
-              feedId={entry.feed_id} 
-              iconId={entry.feed?.icon?.icon_id}
-              size={18}
-            />
-            <span className="font-medium">{entry.feed?.title}</span>
-            {entry.author && (
-              <>
-                <span className="text-[var(--color-text-tertiary)]">·</span>
-                <span>{entry.author}</span>
-              </>
-            )}
+        {entry.title}
+      </h1>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-4 text-sm text-[var(--color-text-secondary)]">
+        <FeedIcon
+          feedId={entry.feed_id}
+          iconId={entry.feed?.icon?.icon_id}
+          size={18}
+        />
+        <span className="font-medium">{entry.feed?.title}</span>
+        {entry.author && (
+          <>
             <span className="text-[var(--color-text-tertiary)]">·</span>
-            <time dateTime={entry.published_at}>
-              {formatRelativeTime(entry.published_at)}
-            </time>
-            {entry.reading_time > 0 && (
-              <>
-                <span className="text-[var(--color-text-tertiary)]">·</span>
-                <span>{formatReadingTime(entry.reading_time)} read</span>
-              </>
-            )}
-          </div>
-
-          {/* Audio Player Button for Podcasts */}
-          {audioEnclosure && (
-            <div className="mt-4">
-              <PlayButton 
-                entry={entry} 
-                enclosure={audioEnclosure}
-                size="md"
-                showLabel
-                showAddToQueue
-              />
-            </div>
-          )}
-
-          {/* TTS Listen Button for text articles (no podcast audio) */}
-          {!audioEnclosure && !effectiveYouTubeId && (
-            <div className="mt-4">
-              <TTSButton
-                entry={entry}
-                size="md"
-                variant="outline"
-                showLabel
-                showAddToQueue
-              />
-            </div>
-          )}
-        </header>
-
-        {/* YouTube Video Play Button */}
-        {effectiveYouTubeId && (
-          <YouTubeVideoTrigger entry={entry} youtubeId={effectiveYouTubeId} />
+            <span>{entry.author}</span>
+          </>
         )}
+        <span className="text-[var(--color-text-tertiary)]">·</span>
+        <time dateTime={entry.published_at}>
+          {formatRelativeTime(entry.published_at)}
+        </time>
+        {entry.reading_time > 0 && (
+          <>
+            <span className="text-[var(--color-text-tertiary)]">·</span>
+            <span>{formatReadingTime(entry.reading_time)} read</span>
+          </>
+        )}
+      </div>
 
-        {/* Video Enclosure Play Button (non-YouTube videos) */}
-        {!effectiveYouTubeId && videoEnclosure && (
-          <div className="mb-8 flex items-center gap-3">
+      {audioEnclosure && (
+        <div className="mt-4">
+          <PlayButton
+            entry={entry}
+            enclosure={audioEnclosure}
+            size="md"
+            showLabel
+            showAddToQueue
+          />
+        </div>
+      )}
+
+      {!audioEnclosure && !effectiveYouTubeId && (
+        <div className="mt-4">
+          <TTSButton
+            entry={entry}
+            size="md"
+            variant="outline"
+            showLabel
+            showAddToQueue
+          />
+        </div>
+      )}
+    </header>
+  );
+  const primaryMedia = effectiveYouTubeId
+    ? (
+        <div style={avoidColumnBreakStyle}>
+          <YouTubeVideoTrigger entry={entry} youtubeId={effectiveYouTubeId} />
+        </div>
+      )
+    : (!effectiveYouTubeId && videoEnclosure)
+      ? (
+          <div className="mb-8 flex items-center gap-3" style={avoidColumnBreakStyle}>
             <button
               onClick={() => playVideo(videoEnclosure, entry)}
               className={cn(
@@ -438,61 +484,126 @@ export function ArticleContent({
               </button>
             )}
           </div>
-        )}
-
-        {/* Content fetch status */}
-        {isLoadingReader && (
-          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-[var(--color-surface-secondary)] text-sm text-[var(--color-text-tertiary)] animate-pulse">
+        )
+      : null;
+  const statusBadges = (
+    <>
+      {isLoadingReader && (
+        <div className="mb-4 space-y-4 animate-pulse" style={avoidColumnBreakStyle}>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-surface-secondary)] text-sm text-[var(--color-text-tertiary)]">
             <Loader2 size={14} className="animate-spin" />
             Loading full article content...
           </div>
-        )}
-        {effectiveFetchError && !isLoadingReader && (
-          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 text-sm text-red-500">
-            {effectiveFetchError}
+          <div className="space-y-3">
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-full" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[95%]" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[88%]" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[92%]" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[40%]" />
+            <div className="h-6" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-full" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[90%]" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[96%]" />
+            <div className="h-3 bg-[var(--color-surface-secondary)] rounded w-[60%]" />
           </div>
+        </div>
+      )}
+      {effectiveFetchError && !isLoadingReader && (
+        <div
+          className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 text-sm text-red-500"
+          style={avoidColumnBreakStyle}
+        >
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="flex-1">{effectiveFetchError}</span>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-500/15 hover:bg-red-500/25 transition-colors"
+            onClick={onRetryFetch ?? handleToggleReaderView}
+          >
+            <RotateCcw size={12} />
+            Retry
+          </button>
+        </div>
+      )}
+      {isReaderView && readerContent && !isLoadingReader && (
+        <div
+          className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-[var(--color-accent-primary)]/10 text-xs text-[var(--color-accent-fg)]"
+          style={avoidColumnBreakStyle}
+        >
+          Full article content loaded
+        </div>
+      )}
+    </>
+  );
+  const articleHtml = (
+    <div
+      ref={contentRef}
+      onClick={handleContentClick}
+      className={cn(
+        'prose prose-stone dark:prose-invert max-w-none',
+        !originalTypography && 'informeer-article-typography',
+        'prose-headings:font-semibold prose-headings:text-[var(--color-text-primary)]',
+        'prose-p:text-[var(--color-text-secondary)] prose-p:leading-relaxed',
+        'prose-a:text-[var(--color-accent-fg)] prose-a:no-underline hover:prose-a:underline',
+        'prose-img:rounded-lg prose-img:shadow-md prose-img:cursor-zoom-in',
+        'prose-blockquote:border-l-[var(--color-accent-fg)] prose-blockquote:text-[var(--color-text-secondary)]',
+        'prose-code:bg-[var(--color-surface-inset)] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.875em]',
+        'prose-pre:bg-[var(--color-surface-secondary)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]',
+      )}
+      style={articleBodyStyle}
+      dangerouslySetInnerHTML={{ __html: articleContent }}
+    />
+  );
+
+  return (
+    <>
+      {articleTypographyCss && <style>{articleTypographyCss}</style>}
+      <div role="main" aria-label="Article content" className={cn(isPaginated && 'flex h-full min-h-0 flex-col')}>
+        {!isPaginated && (
+          <div style={{ height: PAGINATED_HEADER_OFFSET }} />
         )}
-        {isReaderView && readerContent && !isLoadingReader && (
-          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-[var(--color-accent-primary)]/10 text-xs text-[var(--color-accent-fg)]">
-            Full article content loaded
-          </div>
+
+        <div className={cn(
+          "mx-auto px-6",
+          !isPaginated ? "py-8" : undefined,
+          isPaginated && 'flex min-h-0 flex-1 flex-col',
+          className
         )}
+          data-article-layout
+          style={articleLayoutStyle}
+        >
+        {!isPaginated && articleHeader}
+        {!isPaginated && primaryMedia}
+        {!isPaginated && statusBadges}
 
         {/* Article HTML Content */}
-        <div>
+        <div className={cn(isPaginated && 'flex min-h-0 flex-1 flex-col')}>
           <div 
-            ref={contentRef}
-            onClick={handleContentClick}
+            data-article-flow
             className={cn(
-              'prose prose-stone dark:prose-invert max-w-none',
-              !originalTypography && 'informeer-article-typography',
-              'prose-headings:font-semibold prose-headings:text-[var(--color-text-primary)]',
-              'prose-p:text-[var(--color-text-secondary)] prose-p:leading-relaxed',
-              'prose-a:text-[var(--color-accent-fg)] prose-a:no-underline hover:prose-a:underline',
-              'prose-img:rounded-lg prose-img:shadow-md prose-img:cursor-zoom-in',
-              'prose-blockquote:border-l-[var(--color-accent-fg)] prose-blockquote:text-[var(--color-text-secondary)]',
-              'prose-code:bg-[var(--color-surface-inset)] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.875em]',
-              'prose-pre:bg-[var(--color-surface-secondary)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]',
+              isPaginated && 'min-h-0 flex-1 pb-8',
             )}
-            style={articleBodyStyle}
-            dangerouslySetInnerHTML={{ __html: articleContent }}
-          />
-
-          {/* Footer: Link to original */}
-          {showFooter && (
-            <footer className="mt-12 pt-6 border-t border-[var(--color-border-subtle)]">
-              <a
-                href={entry.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-[var(--color-accent-fg)] hover:underline"
-              >
-                <ExternalLink size={14} />
-                Read original article
-              </a>
-            </footer>
-          )}
+            style={articleFlowStyle}
+          >
+            {isPaginated && (
+              <>
+                {articleHeader}
+                {primaryMedia}
+                {statusBadges}
+              </>
+            )}
+            {articleHtml}
+            {isPaginated && paginatedTrailingBlankColumns > 0 && Array.from({ length: paginatedTrailingBlankColumns }).map((_, index) => (
+              <div
+                key={`article-trailing-column-${index}`}
+                aria-hidden="true"
+                data-article-trailing-spacer
+                style={{ breakBefore: 'column', height: '100%' }}
+              />
+            ))}
+          </div>
         </div>
+      </div>
       </div>
       
       {/* Image Gallery Overlay */}

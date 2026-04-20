@@ -27,6 +27,7 @@ import { AudioPlayer } from '@/components/player/AudioPlayer';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { TTSMiniPlayer } from '@/components/tts/TTSMiniPlayer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
 import type { Entry, Feed } from '@/types/api';
 
 const SIDEBAR_PIN_MODE_STORAGE_KEY = 'informeer-sidebar-pin-mode';
@@ -98,7 +99,8 @@ function HomePage() {
     setViewModeForScope,
     getViewModeForScope,
   } = useSettingsStore();
-  const preferFullscreenMagazineReader = einkMode;
+  const isLandscapeViewport = useIsLandscapeViewport();
+  const preferFullscreenMagazineReader = einkMode && (viewMode === 'magazine' || !isLandscapeViewport);
 
   const viewScopeKey = useMemo(() => {
     if (mediaType === 'audio') return 'audio';
@@ -238,7 +240,9 @@ function HomePage() {
 
   // Go back to previous view
   const handleGoBack = useCallback(() => {
-    if (selectedChannelId !== null) {
+    if (selectedEntry) {
+      handleSelectEntry(null);
+    } else if (selectedChannelId !== null) {
       // If viewing a specific video channel, go back to the video main view
       setSelectedChannelId(null);
       setSelectedChannelTitle(null);
@@ -283,11 +287,11 @@ function HomePage() {
     return false;
   }, []);
 
-  const handleSelectEntry = useCallback((entry: Entry) => {
+  const handleSelectEntry = useCallback((entry: Entry | null) => {
     selectEntry(entry);
     // Don't mark podcasts or videos as read - they're marked when played to completion
     // Only mark regular articles as read when opened
-    if (entry.status === 'unread' && !isPodcastEntry(entry) && !isVideoEntry(entry)) {
+    if (entry && entry.status === 'unread' && !isPodcastEntry(entry) && !isVideoEntry(entry)) {
       markAsRead(entry.id);
     }
   }, [selectEntry, markAsRead, isPodcastEntry, isVideoEntry]);
@@ -438,7 +442,7 @@ function HomePage() {
         sidebarPinned={sidebarPinned}
         onSidebarOverlayRequest={() => setSidebarOverlayRequestToken((prev) => prev + 1)}
         headerTitle={getViewTitle()}
-        onBack={undefined}
+        onBack={(selectedEntry || selectedChannelId !== null || navigationHistory.length > 0) ? handleGoBack : undefined}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         viewMode={viewMode}

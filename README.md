@@ -66,10 +66,21 @@ npm run dev
 
 Development services:
 
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost:3000`
 - API: `http://localhost:3011`
 
 The Vite dev server proxies API requests to the Bun backend automatically.
+
+Android live-reload from the repo root:
+
+- `npm run android:targets` lists the connected Android target serials.
+- `npm run android:reverse` configures `adb reverse` for the frontend and API ports.
+- `npm run android:dev` now runs non-interactively.
+- If exactly one Android device or emulator is connected, it is selected automatically.
+- If more than one target is connected, set `ANDROID_TARGET` explicitly, for example `ANDROID_TARGET=emulator-5554 npm run android:dev`.
+- The Android scripts use `adb reverse` so the app can keep using `http://localhost` inside the emulator or device. `10.0.2.2` can still reach the host, but it is not a secure origin, so service worker and offline blob caching are unavailable there.
+
+Installed Android builds keep a bundled local login shell for server selection, then relaunch into the server-hosted frontend so that server's own PWA cache stays authoritative for offline restarts while saved media remains available locally.
 
 `npm run hooks:install` enables the repo-local pre-push hook and `push.recurseSubmodules=check`, which helps prevent accidental `frontend/src/frameer` submodule pointer changes.
 
@@ -195,6 +206,11 @@ Key architectural characteristics:
 npm run dev              # Start API and frontend together
 npm run dev:api          # Start Bun API only
 npm run dev:frontend     # Start Vite frontend only
+npm run android:dev      # Start API + Android dev server + live-reload Android app
+npm run android:reverse  # Configure adb reverse for localhost Android testing
+npm run android:build    # Build native Android debug APK
+npm run android:install  # Build and install native Android debug app
+npm run android:open     # Open the Android project in Android Studio
 npm run hooks:install    # Install local git hook protections
 
 # Build

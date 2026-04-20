@@ -29,6 +29,38 @@ interface SaveBlobOptions {
 const CACHE_NAME = 'informeer-offline';
 const REGISTRY_KEY = 'informeer-offline-items';
 
+function getOfflineStorageUnavailableReason(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  if (!window.isSecureContext) {
+    return 'Offline downloads require a secure app origin. On Android dev, run npm run android:reverse and open the app from http://localhost instead of http://10.0.2.2.';
+  }
+
+  if (!('caches' in window)) {
+    return 'Offline downloads are not available because the Cache API is unavailable in this browser.';
+  }
+
+  return null;
+}
+
+function ensureOfflineStorageAvailable(): void {
+  const reason = getOfflineStorageUnavailableReason();
+  if (reason) {
+    throw new Error(reason);
+  }
+
+  if (typeof caches === 'undefined') {
+    throw new Error('Offline downloads are not available because the Cache API is unavailable in this browser.');
+  }
+}
+
+async function openOfflineCache(): Promise<Cache> {
+  ensureOfflineStorageAvailable();
+  return caches.open(CACHE_NAME);
+}
+
 // ── Registry helpers ──
 
 export function getOfflineRegistry(): OfflineItem[] {
@@ -69,7 +101,7 @@ async function pruneRecentOfflineItemsInternal(
   maxRecentItems: number,
 ): Promise<void> {
   const limit = Math.max(0, maxRecentItems);
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await openOfflineCache();
   const registry = getOfflineRegistry();
   const recentItems = registry
     .filter((item) => item.type === type && getRetention(item) === 'recent')
@@ -87,7 +119,7 @@ async function upsertOfflineBlob(
   data: Blob | ArrayBuffer | Uint8Array,
   { retention = 'manual', contentType, maxRecentItems }: SaveBlobOptions = {},
 ): Promise<void> {
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await openOfflineCache();
   const blob = toBlob(data, contentType);
   await cache.put(
     item.cacheKey,
@@ -123,6 +155,7 @@ export async function saveBookOffline(
   coverUrl?: string,
   author?: string,
 ): Promise<void> {
+  ensureOfflineStorageAvailable();
   const resp = await fetch(url, { headers: { Authorization: authHeader } });
   if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
 
@@ -159,6 +192,7 @@ export async function saveMagazineOffline(
   coverUrl?: string,
   feedTitle?: string,
 ): Promise<void> {
+  ensureOfflineStorageAvailable();
   const resp = await fetch(url, { headers: { Authorization: authHeader } });
   if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
 
@@ -195,7 +229,7 @@ export async function savePodcastOffline(
   feedTitle?: string,
   coverUrl?: string,
 ): Promise<void> {
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await openOfflineCache();
   // Podcast URLs are external/public — do NOT send Authorization header
   // (causes CORS preflight failures on third-party podcast hosts)
   const resp = await fetch(url);
@@ -228,7 +262,7 @@ export async function savePodcastOffline(
 
 export async function getCachedBlob(cacheKey: string): Promise<Response | null> {
   try {
-    const cache = await caches.open(CACHE_NAME);
+    const cache = await openOfflineCache();
     return (await cache.match(cacheKey)) ?? null;
   } catch {
     return null;
@@ -271,7 +305,7 @@ export async function pruneRecentOfflineItems(
 
 export async function removeOfflineItem(cacheKey: string): Promise<void> {
   try {
-    const cache = await caches.open(CACHE_NAME);
+    const cache = await openOfflineCache();
     await cache.delete(cacheKey);
   } catch {
     // Cache API not available — still clean the registry
@@ -308,6 +342,7 @@ export function getOfflineStats(): OfflineStats {
 
 export async function clearAllOffline(): Promise<void> {
   try {
+    ensureOfflineStorageAvailable();
     await caches.delete(CACHE_NAME);
   } catch {
     // not critical

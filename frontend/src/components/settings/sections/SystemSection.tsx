@@ -14,8 +14,10 @@ import {
   CloudOff,
   Loader2,
   Check,
+  Server,
 } from 'lucide-react';
 import { api } from '@/api/client';
+import { isAndroidNativeShell, clearServerUrl } from '@/services/native-shell';
 import { useAuthStore } from '@/stores/auth';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { getOfflineStats, clearAllOffline, pruneRecentOfflineItems } from '@/lib/offline/blob-cache';
@@ -345,8 +347,12 @@ const SystemSection: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     logout();
+    if (isAndroidNativeShell()) {
+      await clearServerUrl();
+      return;
+    }
     window.location.href = '/login';
   };
 
@@ -502,6 +508,13 @@ const SystemSection: React.FC = () => {
           icon={forceFetchSuccess ? <Check size={13} /> : <RefreshCw size={13} />}
           label={forceFetchSuccess ? 'Queued!' : 'Fetch All Feeds'}
         />
+        {isAndroidNativeShell() && (
+          <ActionButton
+            onClick={() => clearServerUrl()}
+            icon={<Server size={13} />}
+            label="Change Server"
+          />
+        )}
       </div>
 
       <Separator />

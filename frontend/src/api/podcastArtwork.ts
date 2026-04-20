@@ -12,6 +12,7 @@
  */
 
 import { api } from './client';
+import { buildApiUrl } from './base-url';
 
 const CACHE_KEY = 'informeer-podcast-artwork';
 const CACHE_VERSION = 3;
@@ -70,7 +71,7 @@ function resizeArtworkUrl(url: string, size: number): string {
  */
 async function fetchArtworkFromServer(feedId: number, size: number): Promise<string | null> {
   try {
-    const resp = await fetch(`/v1/podcast-artwork/${feedId}?size=${size}`, {
+    const resp = await fetch(buildApiUrl(`/podcast-artwork/${feedId}?size=${size}`), {
       headers: {
         'Authorization': (api as any).getAuthHeader(),
       },

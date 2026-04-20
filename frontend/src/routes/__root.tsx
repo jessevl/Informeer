@@ -10,7 +10,9 @@ import { flushSyncQueue } from '@/lib/offline/sync-queue';
 import { useFeedsStore } from '@/stores/feeds';
 import { useEntriesStore } from '@/stores/entries';
 import { OfflineBanner } from '@/components/layout/OfflineBanner';
+import { EinkProfilingPanel } from '@/components/debug/EinkProfilingPanel';
 import ThemeInitializer from '@/components/ThemeInitializer';
+import { initializeEinkPowerBridge } from '@/services/eink-power';
 
 // Function to stop TTS playback
 let stopTTSPlayback: (() => void) | null = null;
@@ -74,6 +76,8 @@ function RootComponent() {
   const [isChecking, setIsChecking] = useState(true);
   const offlineInitRef = useRef(false);
 
+  useEffect(() => initializeEinkPowerBridge(), []);
+
   useEffect(() => {
     const init = async () => {
       const isValid = await checkAuth();
@@ -124,6 +128,7 @@ function RootComponent() {
     <>
       <ThemeInitializer />
       <OfflineBanner />
+      <EinkProfilingPanel />
       <div className="animate-fade-in">
         <Outlet />
       </div>

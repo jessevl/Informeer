@@ -5,15 +5,16 @@ import { Button, Input, Panel } from '@frameer/components/ui';
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { login, isLoading, error } = useAuthStore();
+  const { login, isLoading, error, serverUrl } = useAuthStore();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [backendUrl] = useState(serverUrl);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const success = await login(username, password);
+
+    const success = await login(username, password, backendUrl);
     if (success) {
       navigate({ to: '/' });
     }

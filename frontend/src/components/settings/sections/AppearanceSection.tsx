@@ -22,6 +22,7 @@ import {
   SectionHeader,
   Separator,
 } from '../ui';
+import { einkPower } from '@/services/eink-power';
 
 // ── Accent color palette ──────────────────────────────────────────────────────
 
@@ -47,6 +48,10 @@ const AppearanceSection: React.FC = () => {
   const setThemeVariant = useSettingsStore((s) => s.setThemeVariant);
   const einkMode = useSettingsStore((s) => s.einkMode);
   const setEinkMode = useSettingsStore((s) => s.setEinkMode);
+  const einkPowerSavingEnabled = useSettingsStore((s) => s.einkPowerSavingEnabled);
+  const setEinkPowerSavingEnabled = useSettingsStore((s) => s.setEinkPowerSavingEnabled);
+  const einkDebugPanelEnabled = useSettingsStore((s) => s.einkDebugPanelEnabled);
+  const setEinkDebugPanelEnabled = useSettingsStore((s) => s.setEinkDebugPanelEnabled);
   const accentColor = useSettingsStore((s) => s.accentColor);
   const setAccentColor = useSettingsStore((s) => s.setAccentColor);
   const viewMode = useSettingsStore((s) => s.viewMode);
@@ -107,6 +112,24 @@ const AppearanceSection: React.FC = () => {
         enabled={einkMode}
         onChange={setEinkMode}
       />
+
+      {einkMode && einkPower.isHardwareSupported() && (
+        <ToggleRow
+          label="E-Ink Power Saving"
+          description="Allow the native sleep and wake controller to hibernate stable reader surfaces"
+          enabled={einkPowerSavingEnabled}
+          onChange={setEinkPowerSavingEnabled}
+        />
+      )}
+
+      {einkMode && einkPowerSavingEnabled && einkPower.isHardwareSupported() && (
+        <ToggleRow
+          label="E-Ink Debug Overlay"
+          description="Show the floating sleep and wake diagnostics panel"
+          enabled={einkDebugPanelEnabled}
+          onChange={setEinkDebugPanelEnabled}
+        />
+      )}
 
       {!einkMode && (
         <>

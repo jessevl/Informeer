@@ -9,6 +9,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 // API server URL for dev proxy
 const apiUrl = process.env.API_URL || 'http://localhost:3011';
+const devHost = process.env.VITE_HOST || 'localhost';
 
 export default defineConfig({
   plugins: [
@@ -93,7 +94,9 @@ export default defineConfig({
     },
   },
   server: {
+    host: devHost,
     port: 3000,
+    strictPort: true,
     proxy: {
       '/v1': {
         target: apiUrl,

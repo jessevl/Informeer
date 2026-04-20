@@ -86,6 +86,15 @@ export function UnifiedHeader({
         <div className="flex items-center gap-2 px-3 py-3 pointer-events-auto">
           {/* LEFT GROUP: Title with optional icon */}
           <div className="glass-panel-nav eink-shell-surface flex items-center gap-1 px-2.5 py-1.5 min-w-0 overflow-hidden">
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-white/10 dark:hover:bg-white/10 transition-all mr-1"
+                title="Back"
+              >
+                <ArrowLeft className="w-[18px] h-[18px]" strokeWidth={1.75} />
+              </button>
+            )}
             {currentIcon && (
               <span className="flex-shrink-0 text-[var(--color-text-tertiary)]">{currentIcon}</span>
             )}
@@ -103,11 +112,12 @@ export function UnifiedHeader({
           {/* VIEW MODE TOGGLE */}
           {onViewModeChange && (
             <div className="glass-panel-nav eink-shell-surface flex flex-shrink-0 items-center gap-0.5 px-1 py-1 whitespace-nowrap">
-              {([  
+              {([
                 { mode: 'list' as ViewMode, icon: List, label: 'List view' },
                 { mode: 'cards' as ViewMode, icon: LayoutGrid, label: 'Card view' },
                 { mode: 'magazine' as ViewMode, icon: Newspaper, label: 'Magazine view' },
-              ]).map(({ mode, icon: Icon, label }) => (
+              // Cards view requires side-by-side layout (desktop only). Hide on mobile/tablet.
+              ]).filter(({ mode }) => !(isMobile && mode === 'cards')).map(({ mode, icon: Icon, label }) => (
                 <button
                   key={mode}
                   onClick={() => onViewModeChange(mode)}
@@ -206,7 +216,8 @@ export function UnifiedHeader({
                 { mode: 'list' as ViewMode, icon: List, label: 'List view' },
                 { mode: 'cards' as ViewMode, icon: LayoutGrid, label: 'Card view' },
                 { mode: 'magazine' as ViewMode, icon: Newspaper, label: 'Magazine view' },
-              ]).map(({ mode, icon: Icon, label }) => (
+              // Cards view requires side-by-side layout (desktop only). Hide on mobile/tablet.
+              ]).filter(({ mode }) => !(isMobile && mode === 'cards')).map(({ mode, icon: Icon, label }) => (
                 <button
                   key={mode}
                   onClick={() => onViewModeChange(mode)}
