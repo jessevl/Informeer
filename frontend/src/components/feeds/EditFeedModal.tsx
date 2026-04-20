@@ -24,9 +24,6 @@ export function EditFeedModal({ isOpen, onClose, feed, categories, onDelete }: E
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [contentFetchPolicy, setContentFetchPolicy] = useState<ContentFetchPolicy>('rss_only');
   const [scraperRules, setScraperRules] = useState('');
-  const [rewriteRules, setRewriteRules] = useState('');
-  const [blocklistRules, setBlocklistRules] = useState('');
-  const [keeplistRules, setKeeplistRules] = useState('');
   const [userAgent, setUserAgent] = useState('');
   const [disabled, setDisabled] = useState(false);
   const [hideGlobally, setHideGlobally] = useState(false);
@@ -47,9 +44,6 @@ export function EditFeedModal({ isOpen, onClose, feed, categories, onDelete }: E
       setCategoryId(feed.category?.id || null);
       setContentFetchPolicy(feed.content_fetch_policy || (feed.crawler ? 'always' : 'rss_only'));
       setScraperRules(feed.scraper_rules || '');
-      setRewriteRules(feed.rewrite_rules || '');
-      setBlocklistRules(feed.blocklist_rules || '');
-      setKeeplistRules(feed.keeplist_rules || '');
       setUserAgent(feed.user_agent || '');
       setDisabled(feed.disabled);
       setHideGlobally(feed.hide_globally);
@@ -74,9 +68,6 @@ export function EditFeedModal({ isOpen, onClose, feed, categories, onDelete }: E
         content_fetch_policy: contentFetchPolicy,
         crawler: contentFetchPolicy === 'always',
         scraper_rules: scraperRules,
-        rewrite_rules: rewriteRules,
-        blocklist_rules: blocklistRules,
-        keeplist_rules: keeplistRules,
         user_agent: userAgent,
         disabled,
         hide_globally: hideGlobally,
@@ -342,66 +333,6 @@ export function EditFeedModal({ isOpen, onClose, feed, categories, onDelete }: E
                   value={scraperRules}
                   onChange={(e) => setScraperRules(e.target.value)}
                   placeholder="CSS selectors for content extraction"
-                  rows={2}
-                  className={cn(
-                    'w-full px-4 py-2.5 rounded-lg border text-sm',
-                    'bg-[var(--color-surface-inset)] border-[var(--color-border-default)]',
-                    'text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)]',
-                    'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-fg)] focus:border-transparent',
-                    'resize-none'
-                  )}
-                />
-              </div>
-              
-              {/* Rewrite Rules */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
-                  Rewrite Rules
-                </label>
-                <textarea
-                  value={rewriteRules}
-                  onChange={(e) => setRewriteRules(e.target.value)}
-                  placeholder="Content rewriting rules"
-                  rows={2}
-                  className={cn(
-                    'w-full px-4 py-2.5 rounded-lg border text-sm',
-                    'bg-[var(--color-surface-inset)] border-[var(--color-border-default)]',
-                    'text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)]',
-                    'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-fg)] focus:border-transparent',
-                    'resize-none'
-                  )}
-                />
-              </div>
-              
-              {/* Blocklist Rules */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
-                  Blocklist Rules
-                </label>
-                <textarea
-                  value={blocklistRules}
-                  onChange={(e) => setBlocklistRules(e.target.value)}
-                  placeholder="Regex patterns to block entries"
-                  rows={2}
-                  className={cn(
-                    'w-full px-4 py-2.5 rounded-lg border text-sm',
-                    'bg-[var(--color-surface-inset)] border-[var(--color-border-default)]',
-                    'text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)]',
-                    'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-fg)] focus:border-transparent',
-                    'resize-none'
-                  )}
-                />
-              </div>
-              
-              {/* Keeplist Rules */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
-                  Keeplist Rules
-                </label>
-                <textarea
-                  value={keeplistRules}
-                  onChange={(e) => setKeeplistRules(e.target.value)}
-                  placeholder="Regex patterns to keep entries"
                   rows={2}
                   className={cn(
                     'w-full px-4 py-2.5 rounded-lg border text-sm',

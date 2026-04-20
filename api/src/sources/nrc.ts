@@ -168,6 +168,28 @@ function invalidateSession(): void {
   currentSession = null;
 }
 
+/**
+ * Get NRC session cookies for use in authenticated content fetching.
+ * Returns null if NRC credentials are not configured or login fails.
+ */
+export async function getNrcSessionCookies(): Promise<string | null> {
+  const email = getSetting<string>('modules.nrc.email');
+  const rawPassword = getSetting<string>('modules.nrc.password');
+  if (!email || !rawPassword) return null;
+  try {
+    const session = await getSession();
+    return session.cookies;
+  } catch (err: any) {
+    log.debug('[nrc] Failed to get session for RSS content fetch', { error: err.message });
+    return null;
+  }
+}
+
+/** Clear the cached NRC session (e.g., when credentials change) */
+export function invalidateNrcSession(): void {
+  invalidateSession();
+}
+
 /** Authenticated fetch with auto-retry on 401/403 */
 async function authenticatedFetch(url: string, retried = false): Promise<Response> {
   const session = await getSession();

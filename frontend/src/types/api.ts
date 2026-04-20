@@ -46,12 +46,8 @@ export interface Feed {
   parsing_error_message: string;
   parsing_error_count: number;
   scraper_rules: string;
-  rewrite_rules: string;
   crawler: boolean;
   content_fetch_policy: ContentFetchPolicy;
-  blocklist_rules: string;
-  keeplist_rules: string;
-  urlrewrite_rules: string;
   user_agent: string;
   cookie: string;
   username: string;
@@ -146,9 +142,6 @@ export interface CreateFeedRequest {
   username?: string;
   password?: string;
   scraper_rules?: string;
-  rewrite_rules?: string;
-  blocklist_rules?: string;
-  keeplist_rules?: string;
 }
 
 /** Response from POST /v1/feeds — Informeer returns only the feed ID */

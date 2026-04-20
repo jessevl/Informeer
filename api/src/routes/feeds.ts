@@ -31,11 +31,8 @@ function formatFeed(row: any, category?: any, icon?: any) {
     parsing_error_message: row.parsing_error_message || '',
     parsing_error_count: row.parsing_error_count || 0,
     scraper_rules: row.scraper_rules || '',
-    rewrite_rules: row.rewrite_rules || '',
     crawler: !!row.crawler,
     content_fetch_policy: row.content_fetch_policy || 'rss_only',
-    blocklist_rules: row.blocklist_rules || '',
-    keeplist_rules: row.keeplist_rules || '',
     user_agent: row.user_agent || '',
     cookie: row.cookie || '',
     username: row.username || '',
@@ -169,9 +166,6 @@ feeds.post('/v1/feeds', async (c) => {
     username?: string;
     password?: string;
     scraper_rules?: string;
-    rewrite_rules?: string;
-    blocklist_rules?: string;
-    keeplist_rules?: string;
     content_fetch_policy?: string;
     // Extended
     source_type?: string;
@@ -277,8 +271,8 @@ feeds.post('/v1/feeds', async (c) => {
       INSERT INTO feeds (
         user_id, category_id, source_type, source_config, feed_url, site_url, title,
         crawler, content_fetch_policy, user_agent, username, password,
-        scraper_rules, rewrite_rules, blocklist_rules, keeplist_rules
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        scraper_rules
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       user.id, categoryId, sourceType, sourceConfig,
       body.feed_url || '', siteUrl, feedTitle,
@@ -288,9 +282,6 @@ feeds.post('/v1/feeds', async (c) => {
       body.username || '',
       body.password || '',
       body.scraper_rules || '',
-      body.rewrite_rules || '',
-      body.blocklist_rules || '',
-      body.keeplist_rules || '',
     ]);
   } catch (e: any) {
     if (e.message?.includes('UNIQUE') || e.message?.includes('constraint')) {
@@ -346,13 +337,13 @@ feeds.put('/v1/feeds/:id', async (c) => {
 
   // Fields that affect content fetching/extraction — changes trigger a refresh
   const contentAffectingFields = new Set([
-    'crawler', 'content_fetch_policy', 'scraper_rules', 'rewrite_rules', 'user_agent', 'cookie',
-    'feed_url', 'blocklist_rules', 'keeplist_rules',
+    'crawler', 'content_fetch_policy', 'scraper_rules', 'user_agent', 'cookie',
+    'feed_url',
   ]);
 
   const allowedFields = [
     'feed_url', 'site_url', 'title', 'description',
-    'crawler', 'content_fetch_policy', 'scraper_rules', 'rewrite_rules', 'blocklist_rules', 'keeplist_rules',
+    'crawler', 'content_fetch_policy', 'scraper_rules',
     'user_agent', 'cookie', 'username', 'password',
     'disabled', 'no_media_player', 'ignore_http_cache', 'hide_globally',
     'category_id', 'source_config',

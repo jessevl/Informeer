@@ -11,6 +11,8 @@ import { getDb } from '../db/connection.ts';
 import { getSystemCategoryId } from './categories.ts';
 import { log } from '../lib/logger.ts';
 import { clearZLibSession } from '../services/zlib.ts';
+import { invalidateNrcSession } from '../sources/nrc.ts';
+
 
 const settings = new Hono<{ Variables: { user: AuthUser } }>();
 
@@ -93,9 +95,14 @@ function handleModuleSideEffects(
 
   // --- Z-Library credentials ---
   if ('modules.books.zlib_email' in updates || 'modules.books.zlib_password' in updates) {
-    // Clear cached session so it re-authenticates with new credentials
     clearZLibSession();
     log.info('[settings] Z-Library credentials updated, session cleared');
+  }
+
+  // --- NRC credentials ---
+  if ('modules.nrc.email' in updates || 'modules.nrc.password' in updates) {
+    invalidateNrcSession();
+    log.info('[settings] NRC credentials updated, session cleared');
   }
 }
 

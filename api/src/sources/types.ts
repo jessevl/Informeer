@@ -40,9 +40,6 @@ export interface Feed {
   password: string;
   crawler: number;
   scraper_rules: string;
-  rewrite_rules: string;
-  blocklist_rules: string;
-  keeplist_rules: string;
   ignore_http_cache: number;
 }
 

@@ -74,7 +74,7 @@ describe('upsertEntries', () => {
 
     // Verify entries in DB
     const db = getTestDb();
-    const rows = db.query('SELECT * FROM entries WHERE feed_id = 1 ORDER BY id').all() as any[];
+    const rows = db.query('SELECT * FROM entries WHERE feed_id = 1 ORDER BY published_at ASC').all() as any[];
     expect(rows).toHaveLength(2);
     expect(rows[0].title).toBe('First Entry');
     expect(rows[0].hash).toBe('hash-1');

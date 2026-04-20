@@ -3,6 +3,7 @@ import { parseHTML } from 'linkedom';
 import { sanitizeHtml, resolveRelativeUrls, resolveLazyImages, extractFirstImage } from '../lib/html.ts';
 import { log } from '../lib/logger.ts';
 import { throttledFetch, htmlFetchHeaders, BROWSER_USER_AGENT, BOT_USER_AGENT, MAX_RESPONSE_BYTES } from '../lib/http.ts';
+import { getNrcSessionCookies } from '../sources/nrc.ts';
 
 export interface ExtractedContent {
   title: string;
@@ -92,6 +93,7 @@ const PREDEFINED_RULES: Record<string, string> = {
   'volkskrant.nl':        'article .article__body',
   'nrc.nl':               '.article__content',
   'trouw.nl':             'article .article__body',
+  'nytimes.com':          'section[name="articleBody"], .article-body, .StoryBodyCompact, section[data-testid="body-interior"]',
 };
 
 /**
@@ -102,7 +104,7 @@ const SITE_COOKIES: Record<string, string> = {
   'ad.nl': 'didomi_token=yes',
   'telegraaf.nl': 'didomi_token=yes',
   'volkskrant.nl': 'didomi_token=yes',
-  'nrc.nl': 'nmt_closed_cookiebar=1',
+  // nrc.nl uses subscriber session auth — see getPaywallCookies()
   'nu.nl': 'nmt_closed_cookiebar=1',
   'nos.nl': 'npo_cc=30',
   'trouw.nl': 'didomi_token=yes',
@@ -145,6 +147,14 @@ const REMOVE_SELECTORS = [
   '[class*="shareaholic"]',                           // Shareaholic
   '[class*="share-this"]', '[class*="sharethis"]',   // ShareThis
   '[class*="social-sharing"]', '[class*="post-sharing"]', '[class*="entry-share"]',
+  // NYT paywall overlay elements (the extension blocks JS calls that activate these;
+  // we strip them from the DOM so Readability doesn't pick up the overlay text)
+  '#gateway-content', '#standalone-footer',
+  '[data-testid="meter-paywall"]', '[data-testid="paywall"]',
+  '[data-testid="RegGate"]', '[data-testid="gateway"]',
+  '.css-1bd8bfl', // NYT subscription banner class (changes but worth trying)
+  '[class*="Paywall"]', '[class*="paywall"]',
+  '[class*="Gateway"]', '[class*="gateway"]',
 ];
 
 // ---------------------------------------------------------------------------
@@ -394,6 +404,19 @@ async function readResponseBody(response: Response): Promise<string> {
  * socket is reused (keep-alive). The `Connection: close` header (set in
  * `htmlFetchHeaders`) reduces this risk but draining is still required.
  */
+
+/**
+ * Resolve subscriber session cookies for known paywall sites.
+ * Returns null if credentials are not configured or if the site is unknown.
+ */
+async function getPaywallCookies(hostname: string): Promise<string | null> {
+  const domain = hostname.replace(/^\./, '');
+  if (domain === 'nrc.nl' || domain.endsWith('.nrc.nl')) {
+    return getNrcSessionCookies();
+  }
+  return null;
+}
+
 async function fetchPage(url: string, opts?: FeedExtractOptions): Promise<{ html: string; finalUrl: string }> {
   let hostname = '';
   try { hostname = new URL(url).hostname.replace(/^www\./, ''); } catch {}
@@ -434,14 +457,31 @@ async function fetchPage(url: string, opts?: FeedExtractOptions): Promise<{ html
     throw new Error(`Too many redirects for consent-wall site ${hostname}`);
   }
 
-  // Build headers using shared helper, with site-specific overrides
-  const cookieDomain = !opts?.cookie ? Object.keys(SITE_COOKIES).find(d => hostname.includes(d)) : undefined;
+  // Build headers using shared helper, with site-specific overrides.
+  // Priority: per-feed override > paywall session > consent cookie bypass
+  let resolvedCookie = opts?.cookie;
+  if (!resolvedCookie) {
+    const paywallCookie = await getPaywallCookies(hostname);
+    if (paywallCookie) {
+      resolvedCookie = paywallCookie;
+    } else {
+      const cookieDomain = Object.keys(SITE_COOKIES).find(d => hostname.includes(d));
+      resolvedCookie = cookieDomain ? SITE_COOKIES[cookieDomain] : undefined;
+    }
+  }
+
+  // For NYT: use a Google search referrer to bypass metered paywall.
+  // NYT's paywall JS checks the referrer — arriving "from Google" skips enforcement.
+  const isNytUnlock = !opts?.cookie &&
+    (hostname === 'nytimes.com' || hostname.endsWith('.nytimes.com'));
   const refererDomain = Object.keys(SITE_REFERERS).find(d => hostname.includes(d));
+  const resolvedReferer = isNytUnlock ? 'https://www.google.com/' :
+    (refererDomain ? SITE_REFERERS[refererDomain] : undefined);
 
   const headers = htmlFetchHeaders({
     userAgent: opts?.userAgent,
-    cookie: opts?.cookie || (cookieDomain ? SITE_COOKIES[cookieDomain] : undefined),
-    referer: refererDomain ? SITE_REFERERS[refererDomain] : undefined,
+    cookie: resolvedCookie,
+    referer: resolvedReferer,
   });
 
   // Manual redirect loop — intercepts consent gates while draining every body

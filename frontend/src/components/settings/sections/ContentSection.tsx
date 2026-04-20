@@ -353,8 +353,8 @@ const ContentSection: React.FC = () => {
         )}
       </Card>
 
-      {/* MagazineLib Module */}
-      <Card>
+
+      {/* MagazineLib Module */}      <Card>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
