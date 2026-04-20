@@ -211,25 +211,75 @@ function isLikelySocialShareElement(el: Element): boolean {
     (hasSocialHints && hasIconOnlyContent && isCompactWidget);
 }
 
+// ─── Patterns for publisher chrome that should be stripped ─────────────────
+
+/**
+ * class/id hints that reliably identify non-article-body chrome.
+ * ONLY include patterns that are specific enough to never match article content
+ * wrappers. Avoid generic terms like "newsletter", "promo", "ad" that
+ * publishers use as class names on content sections too.
+ */
+const PUBLISHER_CHROME_HINTS = /(?:save-this-story|save_story|cne-audio|paywall-barrier|paywall-message|subscriber-only-badge|piano-offer|pmc-paywall|laterpay|leaky-paywall|article-gate|regwall|hard-wall|soft-wall|outbrain|taboola)/i;
+
+/**
+ * Exact text content (whole-string match) for short chrome-only inline elements.
+ * Use a narrow selector — avoid `div` because div.textContent includes all
+ * descendant text and could accidentally match a content section wrapper.
+ */
+const PUBLISHER_CHROME_TEXT = /^(?:save this story|saved|unsave|subscribe to read|subscribe now|already a subscriber|create a free account|this story is available|members only|sign in to read|get unlimited access|you['']ve reached your (?:free )?article limit|listen to this article|advertisement)\.?$/i;
+
 export function sanitizeArticleHtml(html: string): string {
   if (!html) return html;
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
+  // ── Strip publisher chrome by class/id hints ──────────────────
+  // querySelectorAll returns a static snapshot, so removing earlier elements
+  // doesn't affect iteration; guard with isConnected to skip double-removes.
+  for (const el of Array.from(doc.body.querySelectorAll('[class],[id]'))) {
+    if (!el.isConnected) continue;
+    const hints = (el.getAttribute('class') || '') + ' ' + (el.getAttribute('id') || '');
+    if (PUBLISHER_CHROME_HINTS.test(hints)) {
+      el.remove();
+    }
+  }
+
+  // ── Strip short inline chrome elements by exact text ─────────
+  // Only check `p` and `span` — NOT `div`, because div.textContent is the
+  // concatenation of all descendants and can spuriously match on content divs.
+  for (const el of Array.from(doc.body.querySelectorAll('p, span'))) {
+    if (!el.isConnected) continue;
+    const text = (el.textContent || '').trim();
+    if (
+      text.length < 120 &&
+      PUBLISHER_CHROME_TEXT.test(text) &&
+      el.querySelectorAll('img, iframe, video').length === 0
+    ) {
+      removeElementOrEmptyWrapper(el);
+    }
+  }
+
   for (const img of Array.from(doc.querySelectorAll('img'))) {
     const src = img.getAttribute('src') || '';
     if (!isGoodImageUrl(src, img.outerHTML, getElementHints(img)) || isSocialContainer(img)) {
       removeElementOrEmptyWrapper(img);
+      continue;
     }
+    // Force eager loading so images don't cause column layout reflows mid-read
+    img.removeAttribute('loading');
+    img.removeAttribute('decoding');
+    img.setAttribute('loading', 'eager');
   }
 
   for (const el of Array.from(doc.body.querySelectorAll('*'))) {
+    if (!el.isConnected) continue;
     if (isLikelySocialShareElement(el)) {
       removeElementOrEmptyWrapper(el);
     }
   }
 
   for (const el of Array.from(doc.body.querySelectorAll('p, div, section, aside'))) {
+    if (!el.isConnected) continue;
     if (!el.textContent?.trim() && el.querySelectorAll('img, iframe, video, audio, svg').length === 0) {
       el.remove();
     }

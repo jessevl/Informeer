@@ -418,14 +418,15 @@ function ExpandedSidebarContent({
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Header: collapse + pin ── */}
       {showPanelControls && (
-        <div className="px-1 pb-2 pt-1 flex-shrink-0">
-          <div className="eink-shell-surface flex items-center justify-between rounded-2xl border border-[var(--color-border-default)]/70 bg-[var(--color-surface-base)]/72 px-2 py-1.5 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.42)] backdrop-blur-sm">
+        <div className="px-1 pb-2 pt-3 flex-shrink-0">
+          <div className="flex items-center justify-between gap-2">
             {onToggleCollapse ? (
               <button
                 type="button"
                 onClick={onCloseTemporaryPanel ?? onToggleCollapse}
-                className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)]"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--color-border-default)]/75 bg-transparent text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)]"
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
               >
@@ -436,24 +437,23 @@ function ExpandedSidebarContent({
               type="button"
               onClick={() => onSidebarPinnedChange(!sidebarPinned)}
               className={cn(
-                'flex h-9 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-[background-color,border-color,color,box-shadow]',
+                'flex h-9 w-9 items-center justify-center rounded-xl border transition-[background-color,border-color,color,box-shadow]',
                 sidebarPinned
                   ? 'border-[var(--color-border-emphasis)] bg-[color-mix(in_srgb,var(--color-accent-muted)_78%,transparent)] text-[var(--color-text-primary)] shadow-[0_14px_32px_-26px_rgba(15,23,42,0.45)]'
-                  : 'border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)]'
+                  : 'border-[var(--color-border-default)]/75 bg-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)]'
               )}
-              aria-label={sidebarPinned ? 'Disable hover overlay' : 'Enable hover overlay'}
-              title={sidebarPinned ? 'Pinned layout' : 'Overlay mode'}
+              aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+              title={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
             >
               {sidebarPinned ? <Pin className="h-4 w-4" /> : <PinOff className="h-4 w-4" />}
-              <span>{sidebarPinned ? 'Pinned layout' : 'Overlay mode'}</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Search Button — Planneer-style input bar */}
+      {/* ── Search ── */}
       {onOpenSearch && (
-        <div className="px-1.5 pt-1 pb-1.5">
+        <div className="px-1.5 pt-1 pb-1.5 flex-shrink-0">
           <button
             onClick={onOpenSearch}
             className="eink-shell-surface w-full flex items-center gap-3 px-3 py-1.5 rounded-xl border border-[var(--color-border-default)]/80 bg-[color-mix(in_srgb,var(--color-surface-primary)_78%,transparent)] text-sm text-[var(--color-text-tertiary)] shadow-[0_14px_30px_-28px_rgba(15,23,42,0.35)] backdrop-blur-sm hover:border-[var(--color-border-emphasis)] hover:bg-[color-mix(in_srgb,var(--color-surface-secondary)_82%,transparent)] transition-all"
@@ -467,101 +467,26 @@ function ExpandedSidebarContent({
         </div>
       )}
 
-      {/* Main Navigation */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
-        {/* Main views — Home + media filters + starred */}
-        <div className="mb-4 space-y-0.5">
-          {!offlineMode && (
-          <TreeItem
-            icon={<Home size={18} />}
-            label="Home"
-            subtitle="All feeds"
-            count={totalUnread > 0 ? totalUnread : undefined}
-            isActive={isViewActive({ feedId: null, categoryId: null, starred: false, mediaType: 'all' })}
-            onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'all' })}
-          />
-          )}
-          {audioCategoryId != null && (
-                <TreeItem
-                  icon={<Headphones size={18} />}
-                  label="Audio"
-                  isActive={isViewActive({ mediaType: 'audio' })}
-                  onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'audio' })}
-                  rightAction={onAddFeed ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onAddFeed?.(undefined, 'podcasts'); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-all"
-                      title="Add podcast"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  ) : undefined}
-                />
-          )}
-          {!offlineMode && videoCategoryId != null && (
-                <TreeItem
-                  icon={<Video size={18} />}
-                  label="Video"
-                  isActive={isViewActive({ mediaType: 'video' })}
-                  onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'video' })}
-                  rightAction={onAddFeed ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onAddFeed?.(undefined, 'youtube'); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-all"
-                      title="Add YouTube channel"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  ) : undefined}
-                />
-          )}
-          {magazinesCategoryId != null && (
-                <TreeItem
-                  icon={<BookOpen size={18} />}
-                  label="Magazines"
-                  isActive={isViewActive({ mediaType: 'magazines' })}
-                  onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'magazines' })}
-                  rightAction={onAddFeed ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onAddFeed?.(undefined, 'magazinelib'); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-all"
-                      title="Add magazine"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  ) : undefined}
-                />
-          )}
-          {booksEnabled && (
-                <TreeItem
-                  icon={<Library size={18} />}
-                  label="Books"
-                  isActive={isViewActive({ mediaType: 'books' })}
-                  onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'books' })}
-                  rightAction={onAddFeed ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onAddFeed?.(undefined, 'zlib'); }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-all"
-                      title="Search books"
-                    >
-                      <Plus size={12} />
-                    </button>
-                  ) : undefined}
-                />
-          )}
-          {!offlineMode && (
-          <TreeItem
-            icon={<Star size={18} />}
-            label="Starred"
-            isActive={isViewActive({ starred: true })}
-            onClick={() => onSelectView({ feedId: null, categoryId: null, starred: true, status: 'all', mediaType: 'all' })}
-          />
-          )}
-        </div>
+      {/* ── Main Navigation — 2-column tile grid ── */}
+      <div className="px-1.5 pb-2 flex-shrink-0">
+        <MainNavTiles
+          currentView={currentView}
+          isViewActive={isViewActive}
+          onSelectView={onSelectView}
+          audioCategoryId={audioCategoryId}
+          videoCategoryId={videoCategoryId}
+          magazinesCategoryId={magazinesCategoryId}
+          booksEnabled={booksEnabled}
+          offlineMode={offlineMode}
+          totalUnread={totalUnread}
+          onAddFeed={onAddFeed}
+        />
+      </div>
 
-        {/* Categories & Feeds */}
+      {/* ── Feeds tree ── */}
+      <nav className="flex-1 overflow-y-auto px-2 py-1 min-h-0">
         {!offlineMode && feedsByCategory.length > 0 && (
-          <div className="mt-2">
+          <div>
             <div className="flex items-center justify-between px-3 mb-2">
               <span className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-[0.14em]">
                 Feeds
@@ -587,7 +512,6 @@ function ExpandedSidebarContent({
                 )}
               </div>
             </div>
-
             <div className="space-y-0.5">
               {feedsByCategory.map(cat => (
                 <CategorySection
@@ -600,9 +524,7 @@ function ExpandedSidebarContent({
                   onSelectCategory={() => onSelectView({ feedId: null, categoryId: cat.id, starred: false, status: 'all', mediaType: 'all' })}
                   onSelectFeed={(feedId) => onSelectView({ feedId, categoryId: null, starred: false, status: 'all', mediaType: 'all' })}
                   onEditFeed={onEditFeed}
-                  onAddFeed={(categoryId) => {
-                    onAddFeed?.(categoryId, 'rss');
-                  }}
+                  onAddFeed={(categoryId) => { onAddFeed?.(categoryId, 'rss'); }}
                   pinnedFeedIds={pinnedFeedIds}
                   onTogglePinnedFeed={onTogglePinnedFeed}
                   currentFeedId={currentView.feedId}
@@ -615,30 +537,31 @@ function ExpandedSidebarContent({
         )}
       </nav>
 
-      {/* Footer — Offline toggle + Theme switcher */}
-      <SidebarFooter
-        offlineMode={offlineMode}
-        onOpenSettings={onOpenSettings}
-        onToggleOffline={() => {
-          const newValue = !offlineMode;
-          setOfflineMode(newValue);
-          // If turning ON and current view isn't offline-capable, navigate to first offline view
-          if (newValue) {
-            const mt = currentView.mediaType || 'all';
-            const isOfflineView = mt === 'audio' || mt === 'magazines' || mt === 'books';
-            if (!isOfflineView) {
-              // Pick magazines → audio → books, whichever is available
-              if (magazinesCategoryId != null) {
-                onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'magazines' });
-              } else if (audioCategoryId != null) {
-                onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'audio' });
-              } else if (booksEnabled) {
-                onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'books' });
+      {/* ── Bottom: app context menu (settings + offline) ── */}
+      <div className="px-1.5 pb-3 pt-2 flex-shrink-0 border-t border-[var(--color-border-subtle)]">
+        <SidebarBottomMenu
+          offlineMode={offlineMode}
+          onToggleOffline={() => {
+            const newValue = !offlineMode;
+            setOfflineMode(newValue);
+            if (newValue) {
+              const mt = currentView.mediaType || 'all';
+              const isOfflineView = mt === 'audio' || mt === 'magazines' || mt === 'books';
+              if (!isOfflineView) {
+                if (magazinesCategoryId != null) {
+                  onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'magazines' });
+                } else if (audioCategoryId != null) {
+                  onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'audio' });
+                } else if (booksEnabled) {
+                  onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'books' });
+                }
               }
             }
-          }
-        }}
-      />
+          }}
+          onOpenSettings={onOpenSettings}
+          onManageFeeds={onManageFeeds}
+        />
+      </div>
     </div>
   );
 }
@@ -985,6 +908,279 @@ function RailButton({
           {label}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * MainNavTile — Planneer-style 2-column grid navigation tile
+ */
+function MainNavTile({
+  icon,
+  label,
+  isActive,
+  onClick,
+  trailing,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group flex flex-row items-center gap-2 rounded-[16px] border px-2 py-1.5 text-left transition-all duration-200 w-full',
+        isActive
+          ? 'border-[var(--color-border-emphasis)] bg-[color-mix(in_srgb,var(--color-accent-muted)_80%,transparent)] shadow-[0_18px_34px_-28px_rgba(15,23,42,0.48)]'
+          : 'border-[var(--color-border-default)]/75 bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)] hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-secondary)]'
+      )}
+    >
+      <span className={cn(
+        'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-105',
+        isActive
+          ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent-fg)]'
+          : 'bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]'
+      )}>
+        <span className="[&_svg]:h-3.5 [&_svg]:w-3.5">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12.5px] font-semibold leading-tight text-[var(--color-text-primary)]">{label}</span>
+        {trailing ? <span className="mt-0.5 flex items-center gap-1 leading-none">{trailing}</span> : null}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * MainNavTiles — 2-column grid of MainNavTile components
+ */
+function MainNavTiles({
+  currentView,
+  isViewActive,
+  onSelectView,
+  audioCategoryId,
+  videoCategoryId,
+  magazinesCategoryId,
+  booksEnabled,
+  offlineMode,
+  totalUnread,
+  onAddFeed,
+}: {
+  currentView: AppSidebarProps['currentView'];
+  isViewActive: (check: { feedId?: number | null; categoryId?: number | null; starred?: boolean; mediaType?: string }) => boolean;
+  onSelectView: AppSidebarProps['onSelectView'];
+  audioCategoryId: number | null;
+  videoCategoryId: number | null;
+  magazinesCategoryId: number | null;
+  booksEnabled: boolean;
+  offlineMode: boolean;
+  totalUnread: number;
+  onAddFeed?: AppSidebarProps['onAddFeed'];
+}) {
+  const unreadBadge = totalUnread > 0 ? (
+    <span className="inline-flex items-center rounded-full bg-[var(--color-accent-fg)] px-1.5 py-px text-[10px] font-semibold leading-none text-white">
+      {totalUnread > 999 ? '999+' : totalUnread}
+    </span>
+  ) : undefined;
+
+  return (
+    <nav className="grid grid-cols-2 gap-2">
+      {!offlineMode && (
+        <MainNavTile
+          icon={<Home />}
+          label="Home"
+          isActive={isViewActive({ feedId: null, categoryId: null, starred: false, mediaType: 'all' })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'all' })}
+          trailing={unreadBadge}
+        />
+      )}
+      {audioCategoryId != null && (
+        <MainNavTile
+          icon={<Headphones />}
+          label="Podcasts"
+          isActive={isViewActive({ mediaType: 'audio' })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'audio' })}
+        />
+      )}
+      {!offlineMode && videoCategoryId != null && (
+        <MainNavTile
+          icon={<Video />}
+          label="Videos"
+          isActive={isViewActive({ mediaType: 'video' })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'video' })}
+        />
+      )}
+      {magazinesCategoryId != null && (
+        <MainNavTile
+          icon={<BookOpen />}
+          label="Magazines"
+          isActive={isViewActive({ mediaType: 'magazines' })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'magazines' })}
+        />
+      )}
+      {booksEnabled && (
+        <MainNavTile
+          icon={<Library />}
+          label="Books"
+          isActive={isViewActive({ mediaType: 'books' })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: false, status: 'all', mediaType: 'books' })}
+        />
+      )}
+      {!offlineMode && (
+        <MainNavTile
+          icon={<Star />}
+          label="Starred"
+          isActive={isViewActive({ starred: true })}
+          onClick={() => onSelectView({ feedId: null, categoryId: null, starred: true, status: 'all', mediaType: 'all' })}
+        />
+      )}
+    </nav>
+  );
+}
+
+/**
+ * SidebarBottomMenu — App context menu at bottom of expanded sidebar.
+ * Replaces the old SidebarFooter. Shows settings + offline mode toggle
+ * in a floating panel that opens above the trigger button.
+ */
+function SidebarBottomMenu({
+  offlineMode,
+  onToggleOffline,
+  onOpenSettings,
+  onManageFeeds,
+}: {
+  offlineMode: boolean;
+  onToggleOffline: () => void;
+  onOpenSettings?: () => void;
+  onManageFeeds?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        panelRef.current && !panelRef.current.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
+
+  return (
+    <div className="relative">
+      {/* Floating panel */}
+      {open && (
+        <div
+          ref={panelRef}
+          className="absolute bottom-[calc(100%+6px)] left-0 right-0 z-50 rounded-2xl border border-[var(--color-border-default)]/80 bg-[color-mix(in_srgb,var(--color-surface-base)_96%,transparent)] shadow-[0_24px_48px_-16px_rgba(15,23,42,0.32)] backdrop-blur-md overflow-hidden"
+        >
+          {/* Offline mode toggle */}
+          <div className="px-3 py-2.5 border-b border-[var(--color-border-subtle)]">
+            <div className="flex items-center gap-3">
+              <span className={cn(
+                'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border',
+                offlineMode
+                  ? 'border-[var(--color-border-emphasis)] bg-[var(--color-surface-inverse)] text-[var(--color-text-inverse)]'
+                  : 'border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]'
+              )}>
+                <WifiOff size={13} />
+              </span>
+              <button
+                type="button"
+                onClick={onToggleOffline}
+                className="min-w-0 flex-1 truncate text-left text-sm font-medium text-[var(--color-text-primary)]"
+              >
+                Offline mode
+              </button>
+              <ToggleSwitch size="sm" enabled={offlineMode} onChange={onToggleOffline} />
+            </div>
+          </div>
+
+          {/* Settings */}
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onOpenSettings(); }}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-secondary)] transition-colors"
+            >
+              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]">
+                <Settings size={13} />
+              </span>
+              Settings
+            </button>
+          )}
+
+          {/* Manage feeds */}
+          {onManageFeeds && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onManageFeeds(); }}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-secondary)] transition-colors"
+            >
+              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]">
+                <MoreHorizontal size={13} />
+              </span>
+              Manage Feeds
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Trigger */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className={cn(
+          'w-full flex items-center gap-3 rounded-[22px] border px-3 py-2.5 transition-all',
+          open
+            ? 'border-[var(--color-border-emphasis)] bg-[color-mix(in_srgb,var(--color-accent-muted)_78%,transparent)] text-[var(--color-text-primary)] shadow-[0_14px_32px_-26px_rgba(15,23,42,0.45)]'
+            : 'border-[var(--color-border-default)]/75 bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)]'
+        )}
+        aria-label="App menu"
+        aria-expanded={open}
+      >
+        <span className={cn(
+          'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl border',
+          open
+            ? 'border-[var(--color-border-emphasis)] bg-[var(--color-accent-muted)] text-[var(--color-accent-fg)]'
+            : 'border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]'
+        )}>
+          <Settings size={14} />
+        </span>
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block truncate text-[12.5px] font-semibold leading-tight text-[var(--color-text-primary)]">Informeer</span>
+          <span className="block text-[11px] leading-tight text-[var(--color-text-tertiary)]">
+            {offlineMode ? 'Offline mode on' : 'Settings & more'}
+          </span>
+        </span>
+        <ChevronDown
+          size={14}
+          className={cn(
+            'flex-shrink-0 text-[var(--color-text-tertiary)] transition-transform duration-200',
+            open && 'rotate-180'
+          )}
+        />
+      </button>
     </div>
   );
 }

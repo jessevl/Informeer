@@ -13,12 +13,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getTapZoneAction } from './tap-zones';
 
 export interface ReaderGestureCallbacks {
   nextPage: () => void;
   prevPage: () => void;
   canGoNext: boolean;
   canGoPrev: boolean;
+  /** Called when a tap lands in the center zone. */
+  onToggleControls?: () => void;
 }
 
 export interface ReaderGestureOptions {
@@ -562,16 +565,12 @@ export function useReaderGestures(
     if (!enableClickZones) return;
     // Don't navigate if clicking on a button or interactive element (prevents double-fire)
     if ((e.target as HTMLElement).closest('button, a, [role="button"]')) return;
-    const target = e.currentTarget;
-    const rect = target.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const width = rect.width;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const action = getTapZoneAction(e.clientX, rect);
 
-    if (x < width * 0.2) {
-      callbacksRef.current.prevPage();
-    } else if (x > width * 0.8) {
-      callbacksRef.current.nextPage();
-    }
+    if (action === 'prev') callbacksRef.current.prevPage();
+    else if (action === 'next') callbacksRef.current.nextPage();
+    else callbacksRef.current.onToggleControls?.();
   }, [enableClickZones]);
 
   return {

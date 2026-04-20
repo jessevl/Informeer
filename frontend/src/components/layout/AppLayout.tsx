@@ -15,7 +15,7 @@
  * - Full-screen article reader overlay
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, type CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
 import { ResizeHandle } from '@frameer/components/ui';
 import { useIsMobile, useIsTablet } from '@frameer/hooks/useMobileDetection';
@@ -99,6 +99,24 @@ export function AppLayout({
 }: AppLayoutProps) {
   // Mobile/Tablet detection
   const isMobile = useIsMobile();
+
+  // Android hardware back button handler
+  useEffect(() => {
+    if (!onBack || !isMobile) return;
+
+    const handleBackButton = (e: any) => {
+      // If the app is in its root state and not in a reader, let it exit
+      // But if we have an onBack handler (e.g. to close a reader), consume the event
+      e.preventDefault();
+      onBack();
+    };
+
+    document.addEventListener('backbutton', handleBackButton);
+    return () => {
+      document.removeEventListener('backbutton', handleBackButton);
+    };
+  }, [onBack, isMobile]);
+
   const isTablet = useIsTablet();
   const isMobileOrTablet = isMobile || isTablet;
 
@@ -210,7 +228,13 @@ export function AppLayout({
   // =========================================================================
   if (isMobileOrTablet) {
     return (
-      <div className="h-[100lvh] min-h-[100lvh] w-screen flex flex-col overflow-hidden bg-[var(--color-surface-app)]">
+      <div
+        className="h-[100lvh] min-h-[100lvh] w-screen flex flex-col overflow-hidden bg-[var(--color-surface-app)]"
+        style={{
+          '--app-header-offset': 'var(--mobile-header-offset)',
+          '--app-navbar-offset': 'calc(72px + var(--safe-area-bottom))',
+        } as CSSProperties}
+      >
         {/* Mobile Floating Header — hidden when fullscreen magazine viewer is open */}
         {!isFullscreenReaderOpen && (
           <UnifiedHeader
@@ -301,11 +325,13 @@ export function AppLayout({
           hideShellForOverlay && 'pointer-events-none opacity-0',
         )}
         style={{
+          '--app-header-offset': '3.5rem',
+          '--app-navbar-offset': 'calc(max(var(--safe-area-bottom), 0px) + 1rem)',
           paddingTop: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-top))`,
           paddingBottom: `${FLOATING_PANEL_GUTTER}px`,
           paddingLeft: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-left))`,
           paddingRight: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-right))`,
-        }}
+        } as CSSProperties}
       >
       {/* Sidebar Panel - Recessed behind paper surface, full height */}
       {/* Also hidden when fullscreen magazine viewer is open (e.g. iPad landscape) */}

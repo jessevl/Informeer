@@ -4,10 +4,32 @@
   "version": "0.1.11",
   "description": "Informeer — self-hosted feed reader",
   "license": "AGPL-3.0-or-later",
+  "x-scriptComments": {
+    "dev": "Start the API and frontend dev servers together from the repo root.",
+    "dev:api": "Run the Bun API in watch/dev mode from the api workspace.",
+    "dev:frontend": "Run the frontend dev server and point it at the local API URL, defaulting to http://localhost:3011.",
+    "dev:frontend:android": "Run the Android-friendly frontend dev server on 0.0.0.0:3000 so an emulator or device can connect.",
+    "android:dev": "Start the API, start the Android-friendly frontend server, wait for the frontend to come up, then launch the live-reload Android app on the resolved Android target.",
+    "hooks:install": "Install the repo-local git hooks and enable submodule push protection.",
+    "build": "Build both the frontend and API production outputs.",
+    "build:frontend": "Build the frontend production bundle.",
+    "build:api": "Build the API production output.",
+    "test": "Run the API test suite.",
+    "typecheck": "Run TypeScript type checking for the frontend and API.",
+    "docker:build": "Build the Docker images defined in docker-compose.yml.",
+    "docker:up": "Start the Docker Compose stack in detached mode.",
+    "docker:down": "Stop and remove the Docker Compose stack."
+  },
+  "x-devDependencyComments": {
+    "concurrently": "Runs multiple long-lived commands in one terminal session.",
+    "wait-on": "Waits for the frontend URL to be reachable before launching the Android app."
+  },
   "scripts": {
     "dev": "concurrently -n api,frontend -c blue,green \"npm run dev:api\" \"npm run dev:frontend\"",
     "dev:api": "cd api && bun run dev",
-    "dev:frontend": "cd frontend && npm run dev",
+    "dev:frontend": "sh -c 'cd frontend && API_URL=${API_URL:-http://localhost:${PORT:-3011}} npm run dev'",
+    "dev:frontend:android": "sh -c 'cd frontend && API_URL=${API_URL:-http://localhost:${PORT:-3011}} npm run dev:android:server'",
+    "android:dev": "concurrently -n api,frontend,android -c blue,green,magenta \"npm run dev:api\" \"npm run dev:frontend:android\" \"npx wait-on http://127.0.0.1:3000 && cd frontend && npm run android:dev\"",
     "hooks:install": "git config --local core.hooksPath .githooks && git config --local push.recurseSubmodules check && chmod +x .githooks/pre-push",
     "build": "npm run build:frontend && npm run build:api",
     "build:frontend": "cd frontend && npm run build",
@@ -19,6 +41,7 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "wait-on": "^8.0.5"
   }
 }

@@ -26,11 +26,38 @@ export type EpubReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
  */
 export type ViewMode = 'list' | 'cards' | 'magazine';
 
+const DEFAULT_VIEW_MODES_BY_SCOPE: Record<string, ViewMode> = {
+  home: 'list',
+  audio: 'list',
+  video: 'cards',
+  starred: 'list',
+};
+
+function normalizeViewMode(mode: unknown): ViewMode {
+  return mode === 'cards' || mode === 'magazine' ? mode : 'list';
+}
+
+function normalizeViewModesByScope(value: unknown): Record<string, ViewMode> {
+  if (!value || typeof value !== 'object') {
+    return DEFAULT_VIEW_MODES_BY_SCOPE;
+  }
+
+  const scopedModes = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries({
+      ...DEFAULT_VIEW_MODES_BY_SCOPE,
+      ...scopedModes,
+    }).map(([scope, mode]) => [scope, normalizeViewMode(mode)]),
+  );
+}
+
 interface SettingsState {
   // Appearance
   theme: Theme;
   themeVariant: ThemeVariant;
   einkMode: boolean;
+  einkPowerSavingEnabled: boolean;
+  einkDebugPanelEnabled: boolean;
   accentColor: AccentColor;
   
   // Entry List
@@ -70,6 +97,8 @@ interface SettingsState {
   setTheme: (theme: Theme) => void;
   setThemeVariant: (variant: ThemeVariant) => void;
   setEinkMode: (enabled: boolean) => void;
+  setEinkPowerSavingEnabled: (enabled: boolean) => void;
+  setEinkDebugPanelEnabled: (enabled: boolean) => void;
   setAccentColor: (color: AccentColor) => void;
   setViewMode: (mode: ViewMode) => void;
   setViewModeForScope: (scope: string, mode: ViewMode) => void;
@@ -97,14 +126,11 @@ const DEFAULT_SETTINGS = {
   theme: 'system' as Theme,
   themeVariant: 'warm' as ThemeVariant,
   einkMode: false,
+  einkPowerSavingEnabled: true,
+  einkDebugPanelEnabled: false,
   accentColor: null as AccentColor,
   viewMode: 'list' as ViewMode,
-  viewModesByScope: {
-    home: 'list' as ViewMode,
-    audio: 'list' as ViewMode,
-    video: 'cards' as ViewMode,
-    starred: 'list' as ViewMode,
-  } as Record<string, ViewMode>,
+  viewModesByScope: DEFAULT_VIEW_MODES_BY_SCOPE,
   magazineExcerptLines: 5,
   cardsExcerptLines: 3,
   showArticleImages: true,
@@ -131,6 +157,11 @@ export const useSettingsStore = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setThemeVariant: (variant) => set({ themeVariant: variant }),
       setEinkMode: (enabled) => set({ einkMode: enabled }),
+      setEinkPowerSavingEnabled: (enabled) => set((state) => ({
+        einkPowerSavingEnabled: enabled,
+        einkDebugPanelEnabled: enabled ? state.einkDebugPanelEnabled : false,
+      })),
+      setEinkDebugPanelEnabled: (enabled) => set({ einkDebugPanelEnabled: enabled }),
       setAccentColor: (color) => set({ accentColor: color }),
       setViewMode: (mode) => set({ viewMode: mode }),
       setViewModeForScope: (scope, mode) =>
@@ -141,7 +172,7 @@ export const useSettingsStore = create<SettingsState>()(
             [scope]: mode,
           },
         })),
-      getViewModeForScope: (scope) => get().viewModesByScope[scope] ?? get().viewModesByScope['home'] ?? 'list',
+      getViewModeForScope: (scope) => normalizeViewMode(get().viewModesByScope[scope] ?? get().viewModesByScope['home']),
       setMagazineExcerptLines: (lines) => set({ magazineExcerptLines: Math.min(10, Math.max(3, lines)) }),
       setCardsExcerptLines: (lines) => set({ cardsExcerptLines: Math.min(6, Math.max(2, lines)) }),
       setShowArticleImages: (show) => set({ showArticleImages: show }),
@@ -163,7 +194,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'informeer-settings',
-      version: 5,
+      version: 9,
       migrate: (persistedState: any, version) => {
         if (!persistedState) {
           return persistedState;
@@ -174,9 +205,13 @@ export const useSettingsStore = create<SettingsState>()(
         if (version < 2) {
           return {
             ...persistedState,
+            viewMode: normalizeViewMode(persistedState.viewMode),
+            viewModesByScope: normalizeViewModesByScope(persistedState.viewModesByScope),
             articleTypography: normalizeArticleTypographySettings(persistedState.articleTypography),
             themeVariant: legacyVariant === 'cool' ? 'cool' : 'warm',
             einkMode: legacyVariant === 'eink' ? true : Boolean(persistedState.einkMode),
+            einkPowerSavingEnabled: persistedState.einkPowerSavingEnabled ?? true,
+            einkDebugPanelEnabled: persistedState.einkDebugPanelEnabled ?? DEFAULT_SETTINGS.einkDebugPanelEnabled,
             recentOfflineBooksLimit: persistedState.recentOfflineBooksLimit ?? DEFAULT_SETTINGS.recentOfflineBooksLimit,
             recentOfflineMagazinesLimit: persistedState.recentOfflineMagazinesLimit ?? DEFAULT_SETTINGS.recentOfflineMagazinesLimit,
           };
@@ -184,7 +219,11 @@ export const useSettingsStore = create<SettingsState>()(
 
         return {
           ...persistedState,
+          viewMode: normalizeViewMode(persistedState.viewMode),
+          viewModesByScope: normalizeViewModesByScope(persistedState.viewModesByScope),
           articleTypography: normalizeArticleTypographySettings(persistedState.articleTypography),
+          einkPowerSavingEnabled: persistedState.einkPowerSavingEnabled ?? (persistedState.einkMode ? true : DEFAULT_SETTINGS.einkPowerSavingEnabled),
+          einkDebugPanelEnabled: persistedState.einkDebugPanelEnabled ?? DEFAULT_SETTINGS.einkDebugPanelEnabled,
           recentOfflineBooksLimit: persistedState.recentOfflineBooksLimit ?? DEFAULT_SETTINGS.recentOfflineBooksLimit,
           recentOfflineMagazinesLimit: persistedState.recentOfflineMagazinesLimit ?? DEFAULT_SETTINGS.recentOfflineMagazinesLimit,
         };

@@ -30,6 +30,8 @@ dist-ssr
 
 # Vite cache
 .vite/
+frontend/.npm-cache/
+frontend/android/local.properties
 
 # Database
 *.db

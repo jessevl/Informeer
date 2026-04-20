@@ -7,30 +7,38 @@
  */
 
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { RefreshCw, Rss, X, Star, Check, Circle, ExternalLink, Share2, Play, Pause, MessageSquare, PanelRightClose, FileText, Loader2 } from 'lucide-react';
+import { RefreshCw, Rss, Star, Play, Pause } from 'lucide-react';
 import { useBreakpoint, useVirtualizer, type VirtualItem } from '@/lib/masonry';
-import { cn, getExcerpt, extractFirstImage, formatRelativeTime, formatReadingTime, stripHtml } from '@/lib/utils';
+import { cn, getExcerpt, extractFirstImage, formatRelativeTime, formatReadingTime } from '@/lib/utils';
 import { useIsMobile } from '@frameer/hooks/useMobileDetection';
 import { EntryCard } from './EntryCard';
-import { ArticleContent } from './ArticleContent';
-import { ArticleHeaderActions } from './ArticleHeaderActions';
-import { CommentsPanel } from './CommentsPanel';
+import { ArticleReader } from './ArticleReader';
 import { FeedIcon } from '@/components/feeds/FeedIcon';
 import { useVideoStore, getVideoInfo } from '@/stores/video';
-import { useTTSStore, prepareTextForTTS } from '@/stores/tts';
 import { AudioPlayButton, VideoPlayButton } from '@/components/media';
-import { hasCommentsAvailable } from '@/api/comments';
-import { api } from '@/api/client';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { PullToRefreshIndicator } from '@/components/layout/PullToRefreshIndicator';
 import type { Entry, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
-import { useArticleScrollProgress } from '@/hooks/useArticleScrollProgress';
-import { TypographyPanel } from '@/components/reader/TypographyPanel';
-import { ARTICLE_FONT_OPTIONS, DEFAULT_ARTICLE_TYPOGRAPHY } from '@/lib/typography';
-import { useResolvedIsDark } from '@/hooks/useResolvedIsDark';
+import { einkPower } from '@/services/eink-power';
+
+const EINK_INTERACTION_SETTLE_MS = 180;
+const EINK_MASONRY_LAYOUT_SETTLE_MS = 240;
+
+/** Resolves once all <img> elements in `container` have loaded, or after `timeoutMs`. */
+function waitForPendingImages(container: Element | null, timeoutMs: number): Promise<void> {
+  if (!container) return Promise.resolve();
+  const pending = Array.from(container.querySelectorAll<HTMLImageElement>('img')).filter(img => !img.complete);
+  if (pending.length === 0) return Promise.resolve();
+  return Promise.race([
+    Promise.all(pending.map(img => new Promise<void>(resolve => {
+      img.addEventListener('load', () => resolve(), { once: true });
+      img.addEventListener('error', () => resolve(), { once: true });
+    }))).then(() => undefined),
+    new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
+  ]);
+}
 
 // YouTube Video Trigger - plays YouTube video in our custom player (used in cards)
 function YouTubeVideoTrigger({ entry, youtubeId }: { entry: Entry; youtubeId: string }) {
@@ -117,8 +125,7 @@ interface EntryListProps {
   preferFullscreenReader?: boolean;
 }
 
-// Article Modal for Magazine View - with animations and glass header
-// Uses shared ArticleContent component
+// Article Modal for Magazine View
 function ArticleModal({ 
   entry, 
   onClose,
@@ -132,288 +139,15 @@ function ArticleModal({
   onMarkAsRead?: (entryId: number) => void;
   onMarkAsUnread?: (entryId: number) => void;
 }) {
-  const isUnread = entry.status === 'unread';
-  const einkMode = useSettingsStore((s) => s.einkMode);
-  const articleTypography = useSettingsStore((s) => s.articleTypography);
-  const setArticleTypography = useSettingsStore((s) => s.setArticleTypography);
-  const [isVisible, setIsVisible] = useState(einkMode);
-  const [isClosing, setIsClosing] = useState(false);
-  const [showTypography, setShowTypography] = useState(false);
-  const isDarkMode = useResolvedIsDark();
-  
-  // Check if this is a media entry (podcast or video) - these are marked when played to completion, not when opened
-  const isPodcast = entry.enclosures?.some(e => e.mime_type?.startsWith('audio/')) ?? false;
-  const isVideo = (entry.enclosures?.some(e => e.mime_type?.startsWith('video/')) ?? false) ||
-                  (entry.url && (entry.url.includes('youtube.com') || entry.url.includes('youtu.be')));
-  const isMediaEntry = isPodcast || isVideo;
-  
-  // Comments panel state - open by default when available
-  const hasComments = hasCommentsAvailable(entry);
-  const [showComments, setShowComments] = useState(hasComments);
-  
-  // Reader view state
-  const [isReaderView, setIsReaderView] = useState(false);
-  const [readerContent, setReaderContent] = useState<string | null>(null);
-  const [isLoadingReader, setIsLoadingReader] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const ttsState = useTTSStore();
-  const isTTSCurrentArticle = ttsState.currentEntry?.id === entry.id;
-  const isTTSPlaying = isTTSCurrentArticle && ttsState.isPlaying;
-  const modalArticleWidth = articleTypography.maxWidth + 96;
-  const modalCommentsWidth = showComments && hasComments ? 400 : 0;
-  const modalMaxWidth = `${modalArticleWidth + modalCommentsWidth}px`;
-  
-  // Shared scroll progress bar & position memory
-  const { scrollRef: articleScrollRef, progressRef } = useArticleScrollProgress(entry.id);
-  
-  // Auto-fetch content if RSS content is too short (< 100 chars excluding URLs)
-  useEffect(() => {
-    const textContent = stripHtml(entry.content || '').trim();
-    if (textContent.length < 100 && !readerContent && !isLoadingReader) {
-      setIsLoadingReader(true);
-      setFetchError(null);
-      api.fetchOriginalContent(entry.id)
-        .then(fullEntry => {
-          setReaderContent(fullEntry.content);
-          setIsReaderView(true);
-        })
-        .catch(error => {
-          console.error('Failed to auto-fetch content:', error);
-          setFetchError('Could not load full article content');
-        })
-        .finally(() => {
-          setIsLoadingReader(false);
-        });
-    }
-  }, [entry.id, entry.content]);
-  
-  // Toggle reader view handler
-  const handleToggleReaderView = useCallback(async () => {
-    if (isLoadingReader) return;
-    
-    if (isReaderView) {
-      setIsReaderView(false);
-      return;
-    }
-    
-    if (readerContent) {
-      setIsReaderView(true);
-      return;
-    }
-    
-    setIsLoadingReader(true);
-    setFetchError(null);
-    try {
-      const fullEntry = await api.fetchOriginalContent(entry.id);
-      setReaderContent(fullEntry.content);
-      setIsReaderView(true);
-    } catch (error) {
-      console.error('Failed to fetch reader view content:', error);
-      setFetchError('Could not load full article content');
-    } finally {
-      setIsLoadingReader(false);
-    }
-  }, [isLoadingReader, isReaderView, readerContent, entry.id]);
-  
-  // Animate in on mount
-  useEffect(() => {
-    if (einkMode) {
-      setIsVisible(true);
-      return;
-    }
-    requestAnimationFrame(() => setIsVisible(true));
-  }, [einkMode]);
-  
-  // Handle escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-  
-  // Mark as read when opened (but not for media entries - they're marked when played to completion)
-  useEffect(() => {
-    if (isUnread && onMarkAsRead && !isMediaEntry) {
-      onMarkAsRead(entry.id);
-    }
-  }, [entry.id, isUnread, onMarkAsRead, isMediaEntry]);
-  
-  // Animated close handler
-  const handleClose = () => {
-    setShowTypography(false);
-    if (einkMode) {
-      onClose();
-      return;
-    }
-
-    setIsClosing(true);
-    setIsVisible(false);
-    setTimeout(onClose, 200);
-  };
-
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: entry.title, url: entry.url });
-      } catch {}
-    } else {
-      await navigator.clipboard.writeText(entry.url);
-    }
-  };
-
-  const handleListenToArticle = useCallback(() => {
-    const {
-      modelStatus,
-      initModel,
-      generate,
-      currentEntry: ttsEntry,
-      isPlaying: ttsPlaying,
-      setPlaying,
-      generationStatus,
-    } = useTTSStore.getState();
-
-    if (ttsEntry?.id === entry.id) {
-      if (ttsPlaying) {
-        setPlaying(false);
-      } else if (generationStatus === 'done' || generationStatus === 'generating') {
-        setPlaying(true);
-      } else {
-        const text = prepareTextForTTS(entry.content || '');
-        if (text.length > 0) {
-          if (modelStatus === 'idle') initModel();
-          generate(text, entry);
-        }
-      }
-    } else {
-      const text = prepareTextForTTS(entry.content || '');
-      if (text.length > 0) {
-        if (modelStatus === 'idle') initModel();
-        generate(text, entry);
-      }
-    }
-  }, [entry]);
-
-  return createPortal(
-    <div className={cn(
-      "fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 transition-all duration-300 transition-gentle eink-modal-container",
-      isVisible && !isClosing ? "opacity-100" : "opacity-0"
-    )}>
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm eink-modal-backdrop"
-        onClick={handleClose}
-      />
-      
-      {/* Modal - wider when comments shown */}
-      <div className={cn(
-        "relative w-full max-h-[90vh] bg-[var(--color-surface-base)] rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300 transition-spring eink-shell-surface eink-modal-surface",
-        isVisible && !isClosing ? "scale-100 translate-y-0" : "scale-95 translate-y-4"
-      )}
-        style={{ maxWidth: `min(calc(100vw - 2rem), ${modalMaxWidth})` }}
-      >
-        {/* Floating Glass Header */}
-        <div className="absolute top-0 left-0 right-0 z-30 h-0 overflow-visible pointer-events-none">
-          <div className="flex min-w-0 items-center gap-2 px-3 py-3 pointer-events-auto">
-            {/* LEFT GROUP: Breadcrumb */}
-            <div className="glass-panel-nav eink-shell-surface flex min-w-0 shrink items-center gap-1.5 overflow-hidden px-3 py-1.5 max-w-[min(100%,34rem)]">
-              <span className="text-xs text-[var(--color-text-secondary)] truncate flex-shrink-0">
-                {entry.feed?.title}
-              </span>
-              <span className="text-[var(--color-text-tertiary)] flex-shrink-0">›</span>
-              <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                {entry.title}
-              </span>
-            </div>
-
-            {/* RIGHT GROUP: Actions */}
-            <div className="ml-auto">
-              <ArticleHeaderActions
-                entry={entry}
-                isUnread={isUnread}
-                isReaderView={isReaderView}
-                isLoadingReader={isLoadingReader}
-                hasComments={hasComments}
-                showComments={showComments}
-                showTypography={showTypography}
-                isTTSPlaying={isTTSPlaying}
-                onListenToArticle={handleListenToArticle}
-                onToggleReaderView={handleToggleReaderView}
-                onToggleTypography={() => setShowTypography((value) => !value)}
-                onToggleComments={() => { setShowComments(!showComments); setShowTypography(false); }}
-                onToggleBookmark={() => onToggleBookmark?.(entry.id)}
-                onToggleReadStatus={() => isUnread ? onMarkAsRead?.(entry.id) : onMarkAsUnread?.(entry.id)}
-                onShare={handleShare}
-                onClose={handleClose}
-              />
-            </div>
-          </div>
-        </div>
-
-        {showTypography && (
-          <>
-            <div
-              className="absolute inset-0 z-[35]"
-              onClick={() => setShowTypography(false)}
-            />
-            <TypographyPanel
-              settings={articleTypography}
-              onChange={setArticleTypography}
-              onClose={() => setShowTypography(false)}
-              isDarkMode={isDarkMode}
-              topOffset="3.75rem"
-              fontOptions={ARTICLE_FONT_OPTIONS}
-              originalFormattingTitle="Use the article's default formatting"
-              defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
-              showMarginControls={false}
-              showMaxWidthControl={true}
-            />
-          </>
-        )}
-        
-        {/* Content Area - Split view when comments are visible */}
-        <div className={cn(
-          "flex-1 flex overflow-hidden",
-          showComments ? "gap-0" : ""
-        )}>
-          {/* Article Content - Scrollable */}
-          <article 
-            ref={articleScrollRef as React.RefObject<HTMLElement>}
-            className={cn(
-            "flex-1 overflow-y-auto min-w-0 relative",
-            showComments && "border-r border-[var(--color-border-subtle)]"
-          )}>
-            {/* Reader scroll progress bar */}
-            <div className="sticky top-0 left-0 right-0 z-[40] h-0.5 pointer-events-none">
-              <div 
-                ref={progressRef}
-                className="h-full bg-[var(--color-accent-fg)] transition-[width] duration-150"
-                style={{ width: '0%' }}
-              />
-            </div>
-            <ArticleContent 
-              entry={entry}
-              showCoverImage={true}
-              showFooter={true}
-              isReaderViewControlled={isReaderView}
-              isLoadingReaderControlled={isLoadingReader}
-              readerContentControlled={readerContent}
-              onToggleReaderViewControlled={handleToggleReaderView}
-              fetchError={fetchError}
-            />
-          </article>
-          
-          {/* Comments Panel - shown when toggled */}
-          {showComments && hasComments && (
-            <div className="w-[400px] flex-shrink-0 overflow-hidden">
-              <CommentsPanel entry={entry} className="h-full" />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body
+  return (
+    <ArticleReader
+      modal
+      entry={entry}
+      onClose={onClose}
+      onToggleBookmark={(entryId) => onToggleBookmark?.(entryId)}
+      onMarkAsRead={(entryId) => onMarkAsRead?.(entryId)}
+      onMarkAsUnread={(entryId) => onMarkAsUnread?.(entryId)}
+    />
   );
 }
 
@@ -749,6 +483,7 @@ interface VirtualizedMasonryProps {
   isLoading: boolean;
   isLoadingMore: boolean;
   onLoadMore: () => void;
+  onLayoutActivity?: () => void;
 }
 
 function VirtualizedMasonry({ 
@@ -761,6 +496,7 @@ function VirtualizedMasonry({
   isLoading,
   isLoadingMore,
   onLoadMore,
+  onLayoutActivity,
 }: VirtualizedMasonryProps) {
   const { currentBreakpoint } = useBreakpoint(masonryBreakpoints);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -823,7 +559,16 @@ function VirtualizedMasonry({
     getItemColSpan, // Native colSpan support!
     useAnimationFrameWithResizeObserver: true,
     resizeDelay: 50,
+    onChange: (_instance, sync) => {
+      if (!sync) {
+        onLayoutActivity?.();
+      }
+    },
   });
+
+  useEffect(() => {
+    onLayoutActivity?.();
+  }, [entries.length, currentBreakpoint.name, showImages, excerptLines, onLayoutActivity]);
 
   // getVirtualItems returns { virtualItems, lanes }
   const result = rowVirtualizer.getVirtualItems() as { virtualItems: VirtualItem[], lanes: number };
@@ -939,8 +684,12 @@ export function EntryList({
   const magazineExcerptLines = useSettingsStore((s) => s.magazineExcerptLines);
   const cardsExcerptLines = useSettingsStore((s) => s.cardsExcerptLines);
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
+  const einkMode = useSettingsStore((s) => s.einkMode);
   const isMobile = useIsMobile();
   const useFullscreenMagazineReader = preferFullscreenReader;
+  const feedReadySchedulerRef = useRef<(() => void) | null>(null);
+  const masonryLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const masonryLayoutWorkTagRef = useRef<string | null>(null);
   
   // State for magazine modal
   const [modalEntry, setModalEntry] = useState<Entry | null>(null);
@@ -952,6 +701,183 @@ export function EntryList({
     onRefresh: onRefresh || defaultRefresh,
     enabled: !!onRefresh,
   });
+  const isFeedSurfaceEligible = !selectedEntry && !modalEntry && !isLoading && !isLoadingMore && !isRefetching && !isPTRRefreshing && !isPulling;
+  const scheduleMasonryLayoutReady = useCallback(() => {
+    feedReadySchedulerRef.current?.();
+  }, []);
+
+  const handleMasonryLayoutActivity = useCallback(() => {
+    if (viewMode !== 'magazine' || selectedEntry || modalEntry) return;
+
+    const workTag = masonryLayoutWorkTagRef.current ?? 'feed-list:masonry-layout';
+    masonryLayoutWorkTagRef.current = workTag;
+    einkPower.beginCriticalWork(workTag);
+
+    if (masonryLayoutTimerRef.current) {
+      clearTimeout(masonryLayoutTimerRef.current);
+    }
+
+    masonryLayoutTimerRef.current = setTimeout(() => {
+      masonryLayoutTimerRef.current = null;
+      void (async () => {
+        await einkPower.waitForPaintCommit();
+        // Wait for any in-DOM images that are still loading (lazy-loaded card images)
+        // so the E-ink display doesn't hibernate on a frame with unrendered placeholders.
+        // Cap at 3 s to avoid blocking hibernation if a single image stalls.
+        await waitForPendingImages(listRef.current, 3000);
+        einkPower.endCriticalWork(workTag);
+        scheduleMasonryLayoutReady();
+      })();
+    }, EINK_MASONRY_LAYOUT_SETTLE_MS);
+  }, [modalEntry, scheduleMasonryLayoutReady, selectedEntry, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'magazine' && !selectedEntry && !modalEntry) return;
+
+    if (masonryLayoutTimerRef.current) {
+      clearTimeout(masonryLayoutTimerRef.current);
+      masonryLayoutTimerRef.current = null;
+    }
+
+    if (masonryLayoutWorkTagRef.current) {
+      einkPower.endCriticalWork(masonryLayoutWorkTagRef.current);
+      masonryLayoutWorkTagRef.current = null;
+    }
+  }, [modalEntry, selectedEntry, viewMode]);
+
+  useEffect(() => {
+    return () => {
+      if (masonryLayoutTimerRef.current) {
+        clearTimeout(masonryLayoutTimerRef.current);
+      }
+      if (masonryLayoutWorkTagRef.current) {
+        einkPower.endCriticalWork(masonryLayoutWorkTagRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedEntry || modalEntry) return;
+
+    einkPower.setSurface({
+      mode: 'feed-list',
+      eligible: isFeedSurfaceEligible,
+      reason: isLoading
+        ? 'feed-loading'
+        : isLoadingMore
+          ? 'feed-loading-more'
+          : isRefetching
+            ? 'feed-refetching'
+            : isPTRRefreshing
+              ? 'feed-refreshing'
+              : isPulling
+                ? 'feed-pulling'
+                : undefined,
+      gestureModel: 'scroll',
+    });
+
+    return () => {
+      // Only reset if article-reader hasn't already taken over — avoids a race
+      // where EntryList re-renders after the ArticleReader has registered itself.
+      if (einkPower.getSurfaceMode() !== 'article-reader') {
+        einkPower.setSurface({
+          mode: 'none',
+          eligible: false,
+          reason: 'feed-list-closed',
+          gestureModel: 'none',
+        });
+      }
+    };
+  }, [selectedEntry, modalEntry, isFeedSurfaceEligible, isLoading, isLoadingMore, isRefetching, isPTRRefreshing, isPulling]);
+
+  useEffect(() => {
+    if (!isFeedSurfaceEligible) return;
+
+    const listEl = listRef.current;
+    if (!listEl) return;
+
+    let cancelled = false;
+    let readyTimer: ReturnType<typeof setTimeout> | null = null;
+    let readyToken = 0;
+    let interactionWorkActive = false;
+    const interactionWorkTag = 'feed-list:interaction';
+
+    const beginInteractionWork = () => {
+      if (interactionWorkActive) return;
+      interactionWorkActive = true;
+      einkPower.beginCriticalWork(interactionWorkTag);
+    };
+
+    const endInteractionWork = () => {
+      if (!interactionWorkActive) return;
+      interactionWorkActive = false;
+      einkPower.endCriticalWork(interactionWorkTag);
+    };
+
+    const cancelReady = () => {
+      readyToken += 1;
+      if (readyTimer) {
+        clearTimeout(readyTimer);
+        readyTimer = null;
+      }
+    };
+
+    const scheduleReady = () => {
+      cancelReady();
+      const token = ++readyToken;
+      readyTimer = setTimeout(() => {
+        readyTimer = null;
+        void (async () => {
+          await einkPower.waitForPaintCommit();
+          if (cancelled || token != readyToken) return;
+          endInteractionWork();
+          await einkPower.markVisualStable();
+          if (cancelled || token != readyToken) return;
+          await einkPower.notifyInteractiveReady();
+        })();
+      }, EINK_INTERACTION_SETTLE_MS);
+    };
+
+    const handleInteractionStart = () => {
+      beginInteractionWork();
+      cancelReady();
+    };
+
+    const handleInteractionSettle = () => {
+      scheduleReady();
+    };
+
+    const handleInteractionProgress = () => {
+      beginInteractionWork();
+      scheduleReady();
+    };
+
+    feedReadySchedulerRef.current = scheduleReady;
+
+    listEl.addEventListener('pointerdown', handleInteractionStart, { capture: true, passive: true });
+    listEl.addEventListener('touchstart', handleInteractionStart, { capture: true, passive: true });
+    listEl.addEventListener('pointerup', handleInteractionSettle, { capture: true, passive: true });
+    listEl.addEventListener('touchend', handleInteractionSettle, { capture: true, passive: true });
+    listEl.addEventListener('touchcancel', handleInteractionSettle, { capture: true, passive: true });
+    listEl.addEventListener('wheel', handleInteractionProgress, { capture: true, passive: true });
+    listEl.addEventListener('scroll', handleInteractionProgress, { capture: true, passive: true });
+
+    scheduleReady();
+
+    return () => {
+      cancelled = true;
+      cancelReady();
+      endInteractionWork();
+      feedReadySchedulerRef.current = null;
+      listEl.removeEventListener('pointerdown', handleInteractionStart, { capture: true });
+      listEl.removeEventListener('touchstart', handleInteractionStart, { capture: true });
+      listEl.removeEventListener('pointerup', handleInteractionSettle, { capture: true });
+      listEl.removeEventListener('touchend', handleInteractionSettle, { capture: true });
+      listEl.removeEventListener('touchcancel', handleInteractionSettle, { capture: true });
+      listEl.removeEventListener('wheel', handleInteractionProgress, { capture: true });
+      listEl.removeEventListener('scroll', handleInteractionProgress, { capture: true });
+    };
+  }, [isFeedSurfaceEligible, title, entries.length]);
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
@@ -1032,6 +958,7 @@ export function EntryList({
           isLoading={isLoading}
           isLoadingMore={isLoadingMore}
           onLoadMore={onLoadMore}
+          onLayoutActivity={handleMasonryLayoutActivity}
         />
       );
     }
@@ -1067,7 +994,10 @@ export function EntryList({
       {/* Entry List - Scrollable, with padding for floating header */}
       <div 
         ref={listRef}
-        className="flex-1 overflow-y-auto content-below-header content-above-navbar @container"
+        className={cn(
+          "flex-1 content-below-header content-above-navbar @container",
+          'overflow-y-auto',
+        )}
         style={{
           transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : undefined,
           transition: isPulling ? 'none' : 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)',

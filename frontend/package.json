@@ -6,11 +6,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:android:server": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:targets": "node ./scripts/android-target.mjs --list",
+    "android:reverse": "node ./scripts/android-reverse.mjs 3000 3011",
+    "android:dev": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; CAP_SERVER_URL=\"${CAP_SERVER_URL:-http://localhost:3000}\"; export JAVA_HOME CAP_SERVER_URL; npm run android:reverse && TARGET_ARGS=$(node ./scripts/android-target.mjs) && npx cap sync android && npx cap run android --no-sync $TARGET_ARGS'",
+    "android:build": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; export JAVA_HOME; npm run android:sync && cd android && ./gradlew assembleDebug'",
+    "android:build:release": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; export JAVA_HOME; npm run android:sync && cd android && ./gradlew assembleRelease'",
+    "android:install": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; export JAVA_HOME; npm run android:reverse && npm run android:sync && cd android && ./gradlew installDebug'",
+    "android:studio": "open -a \"Android Studio\" android",
+    "android:emulator:list": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export JAVA_HOME ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/emulator/emulator\" -list-avds'",
+    "android:emulator:start": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export JAVA_HOME ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/emulator/emulator\" -avd Medium_Tablet'",
+    "android:devices": "sh -c 'ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/platform-tools/adb\" devices'",
+    "android:launch": "sh -c 'ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/platform-tools/adb\" shell am start -n com.informeer.app/.MainActivity'"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
     "@fontsource-variable/literata": "^5.2.8",
     "@fontsource/eb-garamond": "^5.2.7",
     "@fontsource/open-sans": "^5.2.7",
@@ -35,6 +51,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
+    "@capacitor/cli": "^8.3.1",
     "@tanstack/router-plugin": "^1.95.1",
     "@types/node": "^25.1.0",
     "@types/react": "^19.0.8",

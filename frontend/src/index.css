@@ -109,6 +109,9 @@ html.theme-eink .animate-fade-in,
 html.theme-eink .animate-scale-in,
 html.theme-eink .animate-slide-down,
 html.theme-eink .animate-slide-in-right,
+html.theme-eink .animate-slide-up,
+html.theme-eink .animate-slide-up-full,
+html.theme-eink .animate-player-enter,
 html.theme-eink .animate-backdrop-in {
   animation: none !important;
 }
@@ -518,23 +521,13 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
    On tablet/desktop (≥ md), uses a fixed value but still adds safe-area
    for iPads in PWA standalone mode. */
 .content-below-header {
-  padding-top: var(--mobile-header-offset);
-}
-@media (min-width: 768px) {
-  .content-below-header {
-    padding-top: 3.5rem;
-  }
+  padding-top: var(--app-header-offset, var(--mobile-header-offset));
 }
 
 /* Bottom padding to clear the floating nav bar on mobile.
    Nav bar is ~56px + safe-area-inset-bottom. */
 .content-above-navbar {
-  padding-bottom: calc(72px + var(--safe-area-bottom));
-}
-@media (min-width: 768px) {
-  .content-above-navbar {
-    padding-bottom: calc(max(var(--safe-area-bottom), 0px) + 1rem);
-  }
+  padding-bottom: var(--app-navbar-offset, calc(72px + var(--safe-area-bottom)));
 }
 
 /* View content area */

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Informeer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #faf9f6; color: #1c1917;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 1.5rem;
+  }
+  .container { width: 100%; max-width: 24rem; text-align: center; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { color: #78716c; font-size: 0.875rem; margin-bottom: 2rem; }
+  .card {
+    background: #fff; border: 1px solid #e7e5e4; border-radius: 1rem;
+    padding: 1.5rem; text-align: left;
+  }
+  label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.5rem; }
+  input {
+    width: 100%; padding: 0.625rem 0.75rem; font-size: 1rem;
+    border: 1px solid #d6d3d1; border-radius: 0.5rem; background: #fafaf9;
+    outline: none; transition: border-color 0.15s;
+  }
+  input:focus { border-color: #78716c; }
+  .hint { font-size: 0.75rem; color: #a8a29e; margin-top: 0.375rem; }
+  button {
+    width: 100%; margin-top: 1rem; padding: 0.625rem;
+    font-size: 0.9375rem; font-weight: 500; color: #fff;
+    background: #1c1917; border: none; border-radius: 0.5rem;
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.8; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .error { color: #dc2626; font-size: 0.8125rem; margin-top: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Informeer</h1>
+  <p class="subtitle">Connect to your server</p>
+  <div class="card">
+    <label for="url">Server URL</label>
+    <input id="url" type="url" inputmode="url" placeholder="https://informeer.example.com"
+           autocomplete="url" autocapitalize="off" spellcheck="false">
+    <p class="hint">The address of your self-hosted Informeer instance.</p>
+    <button id="connect" type="button">Connect</button>
+    <p id="error" class="error" hidden></p>
+  </div>
+</div>
+<script>
+  var urlInput = document.getElementById('url');
+  var connectBtn = document.getElementById('connect');
+  var errorEl = document.getElementById('error');
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.hidden = false;
+  }
+
+  function clearError() {
+    errorEl.hidden = true;
+  }
+
+  function normalizeUrl(raw) {
+    var trimmed = raw.trim().replace(/\/+$/, '');
+    if (!trimmed) return null;
+    if (!/^https?:\/\//i.test(trimmed)) trimmed = 'http://' + trimmed;
+    try {
+      var parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      var path = parsed.pathname.replace(/\/+$/, '');
+      return parsed.origin + (path && path !== '/' ? path : '');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function connect() {
+    clearError();
+    var url = normalizeUrl(urlInput.value);
+    if (!url) {
+      showError('Enter a valid server URL, e.g. https://informeer.example.com');
+      return;
+    }
+
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Connecting…';
+
+    try {
+      // Quick health check to verify the server is reachable
+      var resp = await fetch(url + '/health', { method: 'GET', signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) throw new Error('Server returned ' + resp.status);
+    } catch (e) {
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+      showError('Could not reach the server. Check the URL and try again.');
+      return;
+    }
+
+    try {
+      // Save the URL and relaunch into the remote frontend
+      await window.Capacitor.Plugins.NativeShell.setServerUrl({ url: url });
+      // The plugin relaunches the activity — this line should not be reached
+    } catch (e) {
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+      showError('Failed to save server URL.');
+    }
+  }
+
+  connectBtn.addEventListener('click', connect);
+  urlInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') connect();
+  });
+</script>
+</body>
+</html>

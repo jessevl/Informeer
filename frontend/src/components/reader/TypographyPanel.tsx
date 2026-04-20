@@ -6,7 +6,7 @@
  * all overrides to the epub's native styling.
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { X, RotateCcw, Type } from 'lucide-react';
 import { EPUB_FONT_OPTIONS } from '@/lib/epub-fonts';
@@ -28,6 +28,12 @@ interface TypographyPanelProps {
   defaultSettings?: TypographySettings;
   showMarginControls?: boolean;
   showMaxWidthControl?: boolean;
+  maxPaginatedColumns?: 1 | 2;
+  paginatedColumnHint?: string;
+  /** Hide the Scroll/Paginated reading mode toggle (e.g. for EPUB which is always paginated). Default true. */
+  showReadingModeControl?: boolean;
+  /** Always show the Columns control even when readingMode is not 'paginated'. Default false. */
+  alwaysShowColumns?: boolean;
 }
 
 export function TypographyPanel({
@@ -42,6 +48,10 @@ export function TypographyPanel({
   defaultSettings = DEFAULT_TYPOGRAPHY,
   showMarginControls = true,
   showMaxWidthControl = false,
+  maxPaginatedColumns = 2,
+  paginatedColumnHint,
+  showReadingModeControl = true,
+  alwaysShowColumns = false,
 }: TypographyPanelProps) {
   const update = (partial: Partial<TypographySettings>) => {
     onChange({ ...settings, ...partial, preset: 'custom' });
@@ -57,6 +67,13 @@ export function TypographyPanel({
   };
 
   const isOriginal = settings.preset === 'original';
+  const visiblePaginatedColumns = maxPaginatedColumns === 1
+    ? [{ value: 1 as const, label: 'One' }]
+    : [
+        { value: 1 as const, label: 'One' },
+        { value: 2 as const, label: 'Two' },
+      ];
+  const selectedPaginatedColumnCount = settings.columnCount === 2 && maxPaginatedColumns === 2 ? 2 : 1;
 
   return (
     <div
@@ -146,6 +163,65 @@ export function TypographyPanel({
           onChange={(lineHeight) => update({ lineHeight })}
           muted={isOriginal}
         />
+
+        {showReadingModeControl && (
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">
+              Reading Mode
+            </label>
+            <div className="flex gap-1">
+              {[
+                { value: 'scroll', label: 'Scroll' },
+                { value: 'paginated', label: 'Paginated' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => update({
+                    readingMode: opt.value as TypographySettings['readingMode'],
+                    ...(opt.value === 'scroll' ? { columnCount: 1 as const } : { columnCount: 2 as const }),
+                  })}
+                  className={cn(
+                    'flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                    settings.readingMode === opt.value
+                      ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
+                      : 'bg-[var(--color-surface-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(settings.readingMode === 'paginated' || alwaysShowColumns) && (
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">
+              Columns
+            </label>
+            <div className="flex gap-1">
+              {visiblePaginatedColumns.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => update({ columnCount: opt.value })}
+                  className={cn(
+                    'flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                    selectedPaginatedColumnCount === opt.value
+                      ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
+                      : 'bg-[var(--color-surface-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {paginatedColumnHint && maxPaginatedColumns === 1 && (
+              <p className="mt-2 text-xs text-[var(--color-text-tertiary)]">
+                {paginatedColumnHint}
+              </p>
+            )}
+          </div>
+        )}
 
         {showMaxWidthControl && (
           <SliderSetting
@@ -262,6 +338,7 @@ export function TypographyPanel({
             fontSize: `${settings.fontSize * 0.12}px`,
             lineHeight: settings.lineHeight,
             maxWidth: showMaxWidthControl ? `${Math.min(settings.maxWidth * 0.18, 260)}px` : undefined,
+            columnCount: settings.readingMode === 'scroll' ? settings.columnCount : undefined,
             textAlign: settings.textAlign === 'original' ? undefined : (settings.textAlign as any),
             hyphens: settings.hyphenation ? 'auto' : 'manual',
             padding: showMarginControls
@@ -301,6 +378,21 @@ function SliderSetting({
   disabled?: boolean;
   muted?: boolean;
 }) {
+  // Local display value updated synchronously during drag.
+  // Parent onChange is only called on pointer release to prevent layout jank
+  // (e.g. article container width reflowing on every pixel of maxWidth slider).
+  const [localValue, setLocalValue] = useState(value);
+  const isPointerDownRef = useRef(false);
+  const localValueRef = useRef(value);
+
+  // Keep local state in sync when parent updates the value externally (e.g. reset).
+  useEffect(() => {
+    if (!isPointerDownRef.current) {
+      setLocalValue(value);
+      localValueRef.current = value;
+    }
+  }, [value]);
+
   return (
     <div className={disabled ? 'opacity-40 pointer-events-none' : muted ? 'opacity-60' : undefined}>
       <div className="flex items-center justify-between mb-1.5">
@@ -308,7 +400,7 @@ function SliderSetting({
           {label}
         </label>
         <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">
-          {format(value)}
+          {format(localValue)}
         </span>
       </div>
       <input
@@ -316,8 +408,19 @@ function SliderSetting({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
+        value={localValue}
+        onPointerDown={() => { isPointerDownRef.current = true; }}
+        onPointerUp={() => {
+          isPointerDownRef.current = false;
+          onChange(localValueRef.current);
+        }}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          localValueRef.current = v;
+          setLocalValue(v);
+          // Keyboard interactions don't fire pointerdown, so commit immediately.
+          if (!isPointerDownRef.current) onChange(v);
+        }}
         className="w-full h-1 accent-[var(--color-accent)]"
       />
     </div>

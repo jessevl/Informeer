@@ -1,8 +1,8 @@
 /**
  * Informeer API Client
  * Handles all communication with the Informeer backend
- * Uses HTTP Basic Authentication with username/password
- * API is served from the same origin under /v1
+ * Uses HTTP Basic Authentication with username/password.
+ * API base can be same-origin or a user-configured backend endpoint.
  */
 
 import type {
@@ -18,16 +18,11 @@ import type {
   CreateFeedResponse,
   UpdateEntryRequest,
 } from '@/types/api';
+import { buildApiUrl, buildBackendUrl } from './base-url';
 
 class ApiClient {
-  private baseUrl: string;
   private username: string | null = null;
   private password: string | null = null;
-
-  constructor() {
-    // API is always on the same origin
-    this.baseUrl = '/v1';
-  }
 
   /**
    * Set authentication credentials (username/password for HTTP Basic Auth)
@@ -73,7 +68,7 @@ class ApiClient {
       throw new Error('Not authenticated');
     }
 
-    const url = `${this.baseUrl}${endpoint}`;
+    const url = buildApiUrl(endpoint);
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       'Authorization': this.getAuthHeader(),
@@ -313,7 +308,7 @@ class ApiClient {
       throw new Error('Not authenticated');
     }
 
-    const url = `${this.baseUrl}/export`;
+    const url = buildApiUrl('/export');
     const response = await fetch(url, {
       headers: {
         'Authorization': this.getAuthHeader(),
@@ -337,7 +332,7 @@ class ApiClient {
       throw new Error('Not authenticated');
     }
 
-    const url = `${this.baseUrl}/import`;
+    const url = buildApiUrl('/import');
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -395,7 +390,7 @@ class ApiClient {
    * Returns module status and system info
    */
   async getHealth(): Promise<HealthResponse> {
-    const response = await fetch('/health');
+    const response = await fetch(buildBackendUrl('/health'));
     if (!response.ok) throw new Error('Failed to fetch health');
     return response.json();
   }
@@ -467,7 +462,7 @@ class ApiClient {
     if (!this.isAuthenticated()) throw new Error('Not authenticated');
     const formData = new FormData();
     formData.append('file', file);
-    const url = `${this.baseUrl}/books`;
+    const url = buildApiUrl('/books');
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': this.getAuthHeader() },
@@ -492,11 +487,11 @@ class ApiClient {
   }
 
   getBookFileUrl(id: number): string {
-    return `${this.baseUrl}/books/${id}/file`;
+    return buildApiUrl(`/books/${id}/file`);
   }
 
   getBookCoverUrl(id: number): string {
-    return `${this.baseUrl}/books/${id}/cover`;
+    return buildApiUrl(`/books/${id}/cover`);
   }
 
   async getBookProgress(id: number): Promise<import('@/types/api').BookProgress> {
@@ -554,7 +549,7 @@ class ApiClient {
   }
 
   getZLibCoverProxyUrl(coverUrl: string): string {
-    return `/cover-proxy?url=${encodeURIComponent(coverUrl)}`;
+    return buildBackendUrl(`/cover-proxy?url=${encodeURIComponent(coverUrl)}`);
   }
 }
 

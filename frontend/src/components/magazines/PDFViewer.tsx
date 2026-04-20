@@ -25,11 +25,14 @@ import {
   ReaderNavButtons,
   ReaderProgressBar,
   SyncPositionToast,
+  useAutoHideControls,
 } from '@/components/reader';
+import { useEinkWorkTag, useReaderWakeHandlers } from '@/components/reader/useEinkReaderLifecycle';
 import { useRemoteProgressSync } from '@/hooks/useRemoteProgressSync';
 import { getCachedBlob, removeOfflineItem, saveMagazineOffline, saveMagazineOfflineData, setOfflineItemRetention } from '@/lib/offline/blob-cache';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { useOfflineRegistry } from '@/stores/offline';
+import { einkPower } from '@/services/eink-power';
 
 // Set worker source - use local bundled worker (CDN may not have this version)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -145,6 +148,8 @@ export function PDFViewer({
   const [showControls, setShowControls] = useState(true);
   const [controlsTick, setControlsTick] = useState(0);
 
+  useAutoHideControls(showControls, setShowControls, isLoading);
+
   // Ad detection state
   const [adPages, setAdPagesState] = useState<Set<number>>(new Set());
   const [adDetectionProgress, setAdDetectionProgress] = useState<{ done: number; total: number } | null>(null);
@@ -212,6 +217,21 @@ export function PDFViewer({
   const canvasRightRef = useRef<HTMLCanvasElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const renderTasksRef = useRef<Array<{ cancel: () => void }>>([]);
+  const renderCycleRef = useRef(0);
+
+  const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `pdf:${entryId || 'inline'}` });
+
+  const waitForCanvasCommit = useCallback(async () => {
+    // On Android E-ink, pdf.js can finish writing the canvas before the frame
+    // has actually been presented. Give the browser one frame to commit the
+    // rendered bitmap before we allow the WebView to hibernate again.
+    if (!einkMode || !einkPower.isHardwareSupported()) return;
+
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }, [einkMode]);
+
 
   const supportsSinglePageSpreadSplit = pdfLayout === 'single-page-spread';
   const isCurrentPageLandscape = landscapePages.has(currentPage);
@@ -311,6 +331,7 @@ export function PDFViewer({
     let cancelled = false;
     let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
     let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
+    startEinkWork('init');
 
     async function loadPdf() {
       setIsLoading(true);
@@ -407,6 +428,7 @@ export function PDFViewer({
         console.error('Failed to load PDF:', err);
         setError(err instanceof Error ? err.message : 'Failed to load PDF');
         setIsLoading(false);
+        void finishEinkWork(false);
       }
     }
 
@@ -419,8 +441,9 @@ export function PDFViewer({
       pdfDoc?.destroy();
       pdfDoc = null;
       currentPdfDataRef.current = null;
+      void finishEinkWork(false);
     };
-  }, [entryId, pdfUrl, sessionCacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entryId, finishEinkWork, pdfUrl, sessionCacheKey, startEinkWork]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run ad detection after PDF loads
   useEffect(() => {
@@ -604,6 +627,9 @@ export function PDFViewer({
   const renderPages = useCallback(async () => {
     if (!pdf || !canvasLeftRef.current) return;
 
+    const renderCycle = ++renderCycleRef.current;
+    startEinkWork('render');
+
     // Cancel any in-progress renders
     for (const task of renderTasksRef.current) {
       task.cancel();
@@ -649,11 +675,17 @@ export function PDFViewer({
           canvasRightRef.current.style.display = 'none';
         }
       }
+
+      if (renderCycle !== renderCycleRef.current) return;
+      await waitForCanvasCommit();
+      if (renderCycle !== renderCycleRef.current) return;
+      await finishEinkWork(true);
     } catch (err: any) {
       if (err?.name === 'RenderingCancelledException') return;
       console.error('Failed to render page:', err);
+      void finishEinkWork(false);
     }
-  }, [pdf, currentPage, scale, isSpreadView, getSpreadPages, renderSinglePage, isSplitSpreadPortraitView, splitSpreadHalf]);
+  }, [pdf, currentPage, scale, isSpreadView, getSpreadPages, renderSinglePage, isSplitSpreadPortraitView, splitSpreadHalf, startEinkWork, finishEinkWork, waitForCanvasCommit]);
 
   // Re-render when page, scale, or spread mode changes
   useEffect(() => {
@@ -678,10 +710,13 @@ export function PDFViewer({
     };
   }, []);
 
-  // iOS/mobile: re-render canvas when app returns from background.
-  // Safari purges canvas content when the page is suspended.
-  // Also restore currentPage from the store in case React state was lost.
+  // Web Safari can discard canvas contents while backgrounded, so re-render
+  // on visibility restore there. Skip this on Android native because the
+  // E-ink hibernation path uses WebView pause/resume and would otherwise
+  // trigger an unnecessary PDF re-render on every wake tap.
   useEffect(() => {
+    if (einkPower.isHardwareSupported()) return;
+
     function handleVisibilityChange() {
       if (document.visibilityState === 'visible' && pdf) {
         // Force canvas re-render (iOS clears canvas buffers on suspend)
@@ -695,10 +730,11 @@ export function PDFViewer({
   // Navigate pages with optional animation
   const goToPage = useCallback((page: number) => {
     const clamped = Math.max(1, Math.min(page, totalPages));
+    startEinkWork('jump');
     setSplitSpreadHalf('left');
     setCurrentPage(clamped);
     onPageChange?.(clamped, totalPages);
-  }, [totalPages, onPageChange]);
+  }, [totalPages, onPageChange, startEinkWork]);
 
   // Accept remote sync position (jump to page from another device)
   const handleAcceptRemotePosition = useCallback(() => {
@@ -712,12 +748,14 @@ export function PDFViewer({
 
   const nextPage = useCallback(() => {
     if (isSplitSpreadPortraitView && splitSpreadHalf === 'left') {
+      startEinkWork('page-turn');
       animatePageTurn('slide-left', () => {
         setSplitSpreadHalf('right');
       });
       return;
     }
     if (currentPage >= totalPages) return;
+    startEinkWork('page-turn');
     animatePageTurn('slide-left', () => {
       if (effectivePages) {
         const nextContentPage = findNextContentPage(currentPage, 1);
@@ -734,16 +772,18 @@ export function PDFViewer({
         goToPage(currentPage + 1);
       }
     });
-  }, [currentPage, totalPages, goToPage, animatePageTurn, effectivePages, findNextContentPage, spreadGroups, isSplitSpreadPortraitView, splitSpreadHalf]);
+  }, [currentPage, totalPages, goToPage, animatePageTurn, effectivePages, findNextContentPage, spreadGroups, isSplitSpreadPortraitView, splitSpreadHalf, startEinkWork]);
 
   const prevPage = useCallback(() => {
     if (isSplitSpreadPortraitView && splitSpreadHalf === 'right') {
+      startEinkWork('page-turn');
       animatePageTurn('slide-right', () => {
         setSplitSpreadHalf('left');
       });
       return;
     }
     if (currentPage <= 1) return;
+    startEinkWork('page-turn');
     animatePageTurn('slide-right', () => {
       if (effectivePages) {
         const prevContentPage = findNextContentPage(currentPage, -1);
@@ -760,11 +800,24 @@ export function PDFViewer({
         goToPage(currentPage - 1);
       }
     });
-  }, [currentPage, goToPage, animatePageTurn, effectivePages, findNextContentPage, spreadGroups, isSplitSpreadPortraitView, splitSpreadHalf]);
+  }, [currentPage, goToPage, animatePageTurn, effectivePages, findNextContentPage, spreadGroups, isSplitSpreadPortraitView, splitSpreadHalf, startEinkWork]);
+
+  const toggleControls = useCallback(() => {
+    const nextShowing = !showControls;
+    if (!nextShowing) {
+      einkPower.setDeferHibernation(true);
+      setShowControls(false);
+      setControlsTick((tick) => tick + 1);
+      setTimeout(() => { einkPower.setDeferHibernation(false); }, 500);
+    } else {
+      setShowControls(true);
+      setControlsTick((tick) => tick + 1);
+    }
+  }, [showControls]);
 
   // ─── Shared gesture & keyboard hooks ───────────────────────────────
   const gestures = useReaderGestures(
-    { nextPage, prevPage, canGoNext, canGoPrev },
+    { nextPage, prevPage, canGoNext, canGoPrev, onToggleControls: toggleControls },
     { scale, setScale, maxScale: 5, enableSwipePreview: !einkMode },
   );
 
@@ -780,6 +833,32 @@ export function PDFViewer({
     }),
     onZoomReset: () => { setScale(1); gestures.resetPan(); },
   });
+
+  useReaderWakeHandlers(nextPage, prevPage);
+
+  useEffect(() => {
+    einkPower.setSurface({
+      mode: 'pdf-reader',
+      eligible: !isLoading && !error && !showControls,
+      reason: error
+        ? 'pdf-load-error'
+        : isLoading
+          ? 'pdf-loading'
+          : showControls
+            ? 'pdf-controls-visible'
+            : undefined,
+      gestureModel: 'paginated',
+    });
+
+    return () => {
+      einkPower.setSurface({
+        mode: 'none',
+        eligible: false,
+        reason: 'pdf-reader-closed',
+        gestureModel: 'none',
+      });
+    };
+  }, [isLoading, error, showControls]);
 
   // ─── Spread & fullscreen toggles ──────────────────────────────────
   const toggleSpreadView = useCallback(() => {
@@ -842,17 +921,10 @@ export function PDFViewer({
     toggleAdPageOverride(pdfUrl, currentPage);
   }, [pdfUrl, currentPage, toggleAdPageOverride]);
 
-  // Canvas area click: side zones navigate, middle zone toggles controls
+  // Canvas area click: delegates to shared gesture handler which uses
+  // tap-zone logic (left 30% → prev, right 30% → next, center → toggle)
   const handleCanvasAreaClick = useCallback((e: React.MouseEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = x / rect.width;
-    if (pct > 0.3 && pct < 0.7) {
-      setShowControls(prev => !prev);
-      setControlsTick(t => t + 1);
-    } else {
-      gestures.handleContentClick(e);
-    }
+    gestures.handleContentClick(e);
   }, [gestures.handleContentClick]);
 
   // Ad page markers for shared progress bar
@@ -873,6 +945,7 @@ export function PDFViewer({
         'bg-[var(--color-surface-app)]',
         'animate-fade-in'
       )}
+      style={{ userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
     >
       {/* Header */}
       {showControls && (
@@ -1085,6 +1158,8 @@ export function PDFViewer({
             <div
               className="flex items-center justify-center gap-1 cursor-pointer"
               onClick={handleCanvasAreaClick}
+              onDragStart={(event) => event.preventDefault()}
+              onContextMenu={(event) => event.preventDefault()}
               style={getPageStyle({
                 scale,
                 panOffset: gestures.panOffset,
@@ -1100,7 +1175,7 @@ export function PDFViewer({
               <canvas
                 ref={canvasLeftRef}
                 className="max-h-full shadow-2xl rounded-sm"
-                style={{ imageRendering: 'auto' }}
+                style={{ imageRendering: 'auto', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
               />
               {/* Blur overlay for left ad page in spread */}
               {isAdSkipEnabled && spreadAdInfo?.leftIsAd && (
@@ -1123,7 +1198,7 @@ export function PDFViewer({
               <canvas
                 ref={canvasRightRef}
                 className="max-h-full shadow-2xl rounded-sm"
-                style={{ imageRendering: 'auto', display: 'none' }}
+                style={{ imageRendering: 'auto', display: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
               />
               {/* Blur overlay for right ad page in spread */}
               {isAdSkipEnabled && spreadAdInfo?.rightIsAd && canvasRightRef.current?.style.display !== 'none' && (

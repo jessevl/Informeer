@@ -1,6 +1,7 @@
-import { Check, Circle, ExternalLink, FileText, Headphones, Loader2, MessageSquare, PanelRightClose, Share2, Star, Type, X } from 'lucide-react';
+import { Check, Circle, ExternalLink, FileText, Headphones, Loader2, MessageSquare, MoreVertical, PanelRightClose, Share2, Star, Type, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Entry } from '@/types/api';
+import ContextMenu from '@frameer/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@frameer/components/ui/ContextMenu';
 
 export type ArticleActionId =
@@ -44,6 +45,9 @@ interface ArticleHeaderActionsProps {
   onToggleReadStatus: () => void;
   onShare: () => void;
   onClose: () => void;
+  condensed?: boolean;
+  alwaysVisibleIds?: readonly ArticleActionId[];
+  overflowIds?: readonly ArticleActionId[];
 }
 
 export function getArticleActionDefinitions({
@@ -189,6 +193,9 @@ export function ArticleHeaderActions({
   onToggleReadStatus,
   onShare,
   onClose,
+  condensed = false,
+  alwaysVisibleIds = [],
+  overflowIds = [],
 }: ArticleHeaderActionsProps) {
   const btnClass = 'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-white/10 dark:hover:bg-white/10 transition-colors';
   const definitions = getArticleActionDefinitions({
@@ -210,6 +217,22 @@ export function ArticleHeaderActions({
     onClose,
   }).filter((definition) => definition.show !== false);
 
+  const orderedDefinitions = definitions;
+  const visibleDefinitions = condensed
+    ? orderedDefinitions.filter((definition) => alwaysVisibleIds.includes(definition.id))
+    : orderedDefinitions;
+  const menuDefinitions = condensed
+    ? orderedDefinitions.filter((definition) => overflowIds.includes(definition.id))
+    : [];
+  const menuItems: ContextMenuItem[] = menuDefinitions.map((definition) => ({
+    id: definition.id,
+    label: definition.label,
+    icon: definition.icon(16),
+    onClick: definition.onClick,
+    disabled: definition.disabled,
+    divider: definition.divider,
+  }));
+
   const toneClass = (definition: ArticleActionDefinition) => {
     if (definition.tone === 'warning' && definition.active) {
       return 'text-amber-500 bg-amber-500/10 hover:bg-amber-500/20';
@@ -224,7 +247,7 @@ export function ArticleHeaderActions({
 
   return (
     <div className="glass-panel-nav flex flex-shrink-0 items-center gap-0.5 overflow-hidden px-1.5 py-1 whitespace-nowrap">
-      {definitions.map((definition) => (
+      {visibleDefinitions.map((definition) => (
         <button
           key={definition.id}
           onClick={definition.onClick}
@@ -235,6 +258,18 @@ export function ArticleHeaderActions({
           {definition.icon(18)}
         </button>
       ))}
+
+      {menuItems.length > 0 && (
+        <ContextMenu items={menuItems} trigger="click">
+          <button
+            className={btnClass}
+            title="More actions"
+            aria-label="More actions"
+          >
+            <MoreVertical size={18} />
+          </button>
+        </ContextMenu>
+      )}
     </div>
   );
 }
