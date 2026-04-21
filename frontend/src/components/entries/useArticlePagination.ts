@@ -46,7 +46,7 @@ export function useArticlePagination({
   // ─── Page width measurement ────────────────────────────────────
   const [pageWidth, setPageWidth] = useState(0);
   const [trailingBlankColumns, setTrailingBlankColumns] = useState(0);
-  const [trailingPixelSpacerWidth, setTrailingPixelSpacerWidth] = useState(0);
+  const [targetScrollWidth, setTargetScrollWidth] = useState(0);
 
   // ─── Synchronous initial measurement before first paint ───────
   // Using useLayoutEffect for the initial measure means the column count is
@@ -112,7 +112,8 @@ export function useArticlePagination({
   const getPageMetrics = useCallback((scroller: HTMLElement) => {
     const step = getPageStep(scroller);
     const flow = scroller.querySelector('[data-article-flow]') as HTMLElement | null;
-    const renderedTrailingBlankColumns = flow?.querySelectorAll('[data-article-trailing-spacer]').length ?? 0;
+    
+    // Calculate effective column stride
     const flowStyle = flow ? window.getComputedStyle(flow) : null;
     const columnGap = flowStyle ? Number.parseFloat(flowStyle.columnGap || `${ARTICLE_PAGE_GAP_PX}`) : ARTICLE_PAGE_GAP_PX;
     const fallbackColumnWidth = pageWidth > 0
@@ -125,52 +126,44 @@ export function useArticlePagination({
       ? measuredColumnWidth
       : fallbackColumnWidth;
     const columnStride = columnWidth > 0 ? columnWidth + columnGap : step;
-    const flowPaddingRight = flowStyle ? Number.parseFloat(flowStyle.paddingRight || '0') : 0;
-    const renderedMaxScrollLeft = flow
-      ? Math.max(flow.scrollWidth - flow.clientWidth, 0)
-      : Math.max(scroller.scrollWidth - scroller.clientWidth, 0);
-    const naturalFlowScrollWidth = flow
-      ? Math.max(flow.scrollWidth - flowPaddingRight - renderedTrailingBlankColumns * columnStride, flow.clientWidth)
-      : 0;
-    const naturalMaxScrollLeft = flow
-      ? Math.max(naturalFlowScrollWidth - flow.clientWidth, 0)
-      : Math.max(scroller.scrollWidth - scroller.clientWidth, 0);
+    
+    const renderedTrailingBlankColumns = flow?.querySelectorAll('[data-article-trailing-spacer]').length ?? 0;
+    
+    // WebKit often truncates scrollWidth for short columns. We append &nbsp; blocks to
+    // force accurate widths, making naturalFlowScrollWidth a perfect multiple of columns.
+    const currentScrollWidth = flow ? flow.scrollWidth : 0;
+    const naturalFlowScrollWidth = Math.max(0, currentScrollWidth - renderedTrailingBlankColumns * columnStride);
+    
     const naturalColumnCount = columnStride > 0
       ? Math.max(1, Math.round((naturalFlowScrollWidth + columnGap) / columnStride))
       : 1;
+
     const nextTrailingBlankColumns = effectiveColumnCount > 1
       ? (effectiveColumnCount - (naturalColumnCount % effectiveColumnCount || effectiveColumnCount)) % effectiveColumnCount
       : 0;
-    const totalPages = step > 0
-      ? Math.max(1, Math.ceil((naturalColumnCount + nextTrailingBlankColumns) / effectiveColumnCount))
-      : 1;
-    const desiredLastPageLeft = Math.max(0, (totalPages - 1) * step);
-    const nextTrailingPixelSpacerWidth = Math.max(
-      0,
-      Math.round(desiredLastPageLeft - (naturalMaxScrollLeft + nextTrailingBlankColumns * columnStride)),
-    );
+
+    const totalPages = Math.max(1, Math.ceil((naturalColumnCount + nextTrailingBlankColumns) / effectiveColumnCount));
+
+    const nextTargetScrollWidth = Math.round((totalPages - 1) * step) + scroller.clientWidth;
+
     const getPageLeft = (pageIndex: number) => {
       const clampedPage = Math.max(0, Math.min(totalPages - 1, pageIndex));
-      if (clampedPage === 0) return 0;
-      if (clampedPage >= totalPages - 1) {
-        return renderedMaxScrollLeft;
-      }
-      return Math.min(Math.round(clampedPage * step), renderedMaxScrollLeft);
+      return Math.round(clampedPage * step);
     };
 
     return {
       step,
       totalPages,
       getPageLeft,
-      lastPageLeft: renderedMaxScrollLeft,
+      lastPageLeft: Math.round((totalPages - 1) * step),
       trailingBlankColumns: nextTrailingBlankColumns,
-      trailingPixelSpacerWidth: nextTrailingPixelSpacerWidth,
+      targetScrollWidth: nextTargetScrollWidth,
     };
   }, [effectiveColumnCount, getPageStep, pageWidth]);
 
-  const syncTrailingSpace = useCallback((nextBlankColumns: number, nextPixelSpacerWidth: number) => {
+  const syncTrailingSpace = useCallback((nextBlankColumns: number, nextWidth: number) => {
     setTrailingBlankColumns((prev) => prev === nextBlankColumns ? prev : nextBlankColumns);
-    setTrailingPixelSpacerWidth((prev) => prev === nextPixelSpacerWidth ? prev : nextPixelSpacerWidth);
+    setTargetScrollWidth((prev) => prev === nextWidth ? prev : nextWidth);
   }, []);
 
   // ─── Navigation state ─────────────────────────────────────────
@@ -185,9 +178,9 @@ export function useArticlePagination({
       totalPages,
       lastPageLeft,
       trailingBlankColumns: nextBlankColumns,
-      trailingPixelSpacerWidth: nextPixelSpacerWidth,
+      targetScrollWidth: nextWidth
     } = getPageMetrics(scroller);
-    syncTrailingSpace(nextBlankColumns, nextPixelSpacerWidth);
+    syncTrailingSpace(nextBlankColumns, nextWidth);
     const currentPage = totalPages <= 1
       ? 0
       : scroller.scrollLeft >= lastPageLeft - 4
@@ -254,7 +247,7 @@ export function useArticlePagination({
       scroller.scrollLeft = snapLeft;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trailingPixelSpacerWidth, trailingBlankColumns]);
+  }, [trailingBlankColumns, targetScrollWidth]);
 
   // ─── Image-load nav-state refresh ────────────────────────────────────────
   // Inline images load asynchronously and expand scrollWidth, shifting the
@@ -326,9 +319,9 @@ export function useArticlePagination({
       totalPages,
       getPageLeft,
       trailingBlankColumns: nextBlankColumns,
-      trailingPixelSpacerWidth: nextPixelSpacerWidth,
+      targetScrollWidth: nextWidth
     } = getPageMetrics(scroller);
-    syncTrailingSpace(nextBlankColumns, nextPixelSpacerWidth);
+    syncTrailingSpace(nextBlankColumns, nextWidth);
     const currentPage = Math.max(0, Math.min(totalPages - 1, Math.round(scroller.scrollLeft / step)));
     const snapLeft = getPageLeft(currentPage);
 
@@ -428,9 +421,9 @@ export function useArticlePagination({
       totalPages,
       getPageLeft,
       trailingBlankColumns: nextBlankColumns,
-      trailingPixelSpacerWidth: nextPixelSpacerWidth,
+      targetScrollWidth: nextWidth
     } = getPageMetrics(scroller);
-    syncTrailingSpace(nextBlankColumns, nextPixelSpacerWidth);
+    syncTrailingSpace(nextBlankColumns, nextWidth);
     const currentPage = Math.max(0, Math.min(totalPages - 1, Math.round(scroller.scrollLeft / step)));
     const targetPage = Math.max(0, Math.min(totalPages - 1, currentPage + direction));
     const targetLeft = getPageLeft(targetPage);
@@ -467,15 +460,6 @@ export function useArticlePagination({
 
     const finalizeTurn = () => {
       isPaginatedTransitioningRef.current = false;
-      // If navigating to the last page, React may have committed blank-column/spacer
-      // updates (from syncTrailingSpace) during the rAF boundary. Re-snap to the
-      // actual DOM max so scrollLeft lands exactly on the last column boundary.
-      if (targetPage >= totalPages - 1) {
-        const domMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-        if (domMax > scroller.scrollLeft + 1) {
-          scroller.scrollLeft = domMax;
-        }
-      }
       requestAnimationFrame(updatePageNavState);
       window.setTimeout(updatePageNavState, einkMode ? 60 : PAGINATION_SCROLL_ANIMATION_MS + 32);
       schedulePaginatedReady();
@@ -497,7 +481,8 @@ export function useArticlePagination({
     ? {
         '--article-page-width': pageWidth > 0 ? `${pageWidth}px` : 'calc(100vw - 3rem)',
         '--article-page-height': '100%',
-        '--article-page-trailing-px-spacer': `${trailingPixelSpacerWidth}px`,
+        '--article-scroll-width': targetScrollWidth > 0 ? `${targetScrollWidth}px` : '100%',
+         
         scrollBehavior: 'auto',
         touchAction: 'none',
       } as CSSProperties

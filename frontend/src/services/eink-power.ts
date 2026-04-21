@@ -522,11 +522,32 @@ export function initializeEinkPowerBridge(): () => void {
     });
   }
 
+  // Global orientation-change wake: keep the device awake for 3 s whenever the
+  // screen rotates so all surfaces (lists, article, epub, pdf, etc.) have time
+  // to reflow and repaint before the bridge re-evaluates hibernation eligibility.
+  let orientationWorkTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  const handleOrientationChange = () => {
+    if (!einkPower.isHardwareSupported()) return;
+    if (orientationWorkTimeoutId !== null) clearTimeout(orientationWorkTimeoutId);
+    einkPower.beginCriticalWork('global-orientation-change');
+    orientationWorkTimeoutId = setTimeout(() => {
+      einkPower.endCriticalWork('global-orientation-change');
+      orientationWorkTimeoutId = null;
+    }, 3000);
+  };
+  window.addEventListener('orientationchange', handleOrientationChange);
+
   removeBridgeSubscriptions = () => {
     unsubscribeSettings();
     unsubscribeAudio();
     unsubscribeVideo();
     unsubscribeTTS();
+    window.removeEventListener('orientationchange', handleOrientationChange);
+    if (orientationWorkTimeoutId !== null) {
+      clearTimeout(orientationWorkTimeoutId);
+      einkPower.endCriticalWork('global-orientation-change');
+      orientationWorkTimeoutId = null;
+    }
     if (wakeCommandListenerHandle) {
       void wakeCommandListenerHandle.remove();
       wakeCommandListenerHandle = null;

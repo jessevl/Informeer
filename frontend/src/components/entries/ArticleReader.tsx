@@ -25,7 +25,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { TypographyPanel } from '@/components/reader/TypographyPanel';
 import { ReaderNavButtons } from '@/components/reader/ReaderNavButtons';
 import { useReaderKeyboard } from '@/components/reader';
-import { useReaderWakeHandlers } from '@/components/reader/useEinkReaderLifecycle';
+import { useReaderWakeHandlers, useAutoHideControls } from '@/components/reader/useEinkReaderLifecycle';
 import { usePaginationWheel } from '@/components/reader/usePaginationWheel';
 import { ARTICLE_FONT_OPTIONS, DEFAULT_ARTICLE_TYPOGRAPHY } from '@/lib/typography';
 import { useResolvedIsDark } from '@/hooks/useResolvedIsDark';
@@ -78,6 +78,7 @@ export function ArticleReader({
   const einkMode = useSettingsStore((s) => s.einkMode);
   const articleTypography = useSettingsStore((s) => s.articleTypography);
   const setArticleTypography = useSettingsStore((s) => s.setArticleTypography);
+  const readerToolbarHideDelay = useSettingsStore((s) => s.readerToolbarHideDelay);
   const isPaginated = articleTypography.readingMode === 'paginated';
   const isOverlayReaderLayout = isMobile || fullscreen;
   const isDarkMode = useResolvedIsDark();
@@ -93,6 +94,10 @@ export function ArticleReader({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showTypography, setShowTypography] = useState(false);
 
+  // Auto-hide the prev/next entry navigation buttons after inactivity
+  // (useAutoHideControls call is below, after showComments is declared)
+  const [showNavButtons, setShowNavButtons] = useState(true);
+
   const startEinkWork = useCallback((reason: string) => {
     const tag = `${entryWorkPrefix}:${reason}:${Date.now()}`;
     einkPower.beginCriticalWork(tag);
@@ -107,6 +112,10 @@ export function ArticleReader({
   // Comments panel state - auto-open on desktop only (mobile requires manual open)
   const hasComments = hasCommentsAvailable(entry);
   const [showComments, setShowComments] = useState(!isOverlayReaderLayout && hasComments);
+
+  // Auto-hide the prev/next entry navigation buttons after inactivity.
+  // Suppressed while panels are open so buttons don't vanish mid-interaction.
+  useAutoHideControls(showNavButtons, setShowNavButtons, !isPaginated || showTypography || showComments, readerToolbarHideDelay * 1000);
   
   // Update showComments when entry changes (keep closed on mobile)
   useEffect(() => {
@@ -508,8 +517,9 @@ export function ArticleReader({
 
     if (action === 'prev') { handlePrevPage(); return true; }
     if (action === 'next') { handleNextPage(); return true; }
+    if (action === 'toggle') { setShowNavButtons(prev => !prev); return true; }
     return false;
-  }, [handleNextPage, handlePrevPage, isPaginated, shouldIgnorePaginatedTap]);
+  }, [handleNextPage, handlePrevPage, isPaginated, setShowNavButtons, shouldIgnorePaginatedTap]);
 
   const compactVisibleActionIds = ['bookmark', 'reader-view', 'typography', 'comments'] as const;
   const compactOverflowActionIds = ['listen', 'read-status', 'share', 'open-original'] as const;
@@ -655,7 +665,7 @@ export function ArticleReader({
       onClose();
     }
     setPullDismiss(0);
-  }, [handleNextPage, handlePaginatedTap, handlePrevPage, isPaginated, onClose, pullDismiss]);
+}, [handleNextPage, handlePaginatedTap, handlePrevPage, isPaginated, onClose, pullDismiss]);
 
   const handleArticleClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
     if (!isPaginated) return;
@@ -772,7 +782,7 @@ export function ArticleReader({
             ref={scrollRef}
             tabIndex={-1}
             className={cn(
-              'h-full min-h-0 overscroll-y-contain outline-none',
+              'h-full min-h-0 overscroll-y-contain outline-none relative',
               isPaginated
                 ? 'overflow-x-hidden overflow-y-hidden overscroll-x-contain'
                 : 'overflow-y-auto'
@@ -789,7 +799,7 @@ export function ArticleReader({
             <ArticleContent 
               entry={entry} 
               effectiveColumnCount={effectiveColumnCount}
-              paginatedTrailingBlankColumns={trailingBlankColumns}
+                paginatedTrailingBlankColumns={trailingBlankColumns}
               className={cn(isPaginated && 'h-full')}
               isReaderViewControlled={isReaderView}
               isLoadingReaderControlled={isLoadingReader}
@@ -798,6 +808,9 @@ export function ArticleReader({
               fetchError={fetchError}
               onRetryFetch={handleRetryFetch}
             />
+            {isPaginated && (
+              <div aria-hidden="true" style={{ position: 'absolute', top: 0, left: 0, width: 'var(--article-scroll-width, 100%)', height: '1px', pointerEvents: 'none' }} />
+            )}
           </article>
 
           {isPaginated && (
@@ -807,6 +820,8 @@ export function ArticleReader({
               canGoPrev={pageNavState.canPrev}
               canGoNext={pageNavState.canNext}
               className="z-[55]"
+              visible={showNavButtons}
+              einkMode={einkMode}
             />
           )}
 
@@ -823,7 +838,9 @@ export function ArticleReader({
                 'text-[10px] text-[var(--color-text-tertiary)]',
                 'pointer-events-none select-none',
               )}
-              style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
+              style={{
+                bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
+              }}
             >
               {pageNavState.currentPage + 1} / {pageNavState.totalPages}
             </div>
@@ -984,7 +1001,7 @@ export function ArticleReader({
                 ref={scrollRef}
                 tabIndex={-1}
                 className={cn(
-                  'h-full min-h-0 outline-none',
+                  'h-full min-h-0 outline-none relative',
                   isPaginated
                     ? 'overflow-x-hidden overflow-y-hidden overscroll-x-contain'
                     : 'overflow-y-auto'
@@ -999,6 +1016,7 @@ export function ArticleReader({
                 <ArticleContent
                   entry={entry}
                   effectiveColumnCount={effectiveColumnCount}
+                paginatedTrailingBlankColumns={trailingBlankColumns}
                   className={cn(isPaginated && 'h-full')}
                   isReaderViewControlled={isReaderView}
                   isLoadingReaderControlled={isLoadingReader}
@@ -1007,6 +1025,9 @@ export function ArticleReader({
                   fetchError={fetchError}
                   onRetryFetch={handleRetryFetch}
                 />
+                {isPaginated && (
+                  <div aria-hidden="true" style={{ position: 'absolute', top: 0, left: 0, width: 'var(--article-scroll-width, 100%)', height: '1px', pointerEvents: 'none' }} />
+                )}
               </article>
 
               {isPaginated && (
@@ -1016,6 +1037,8 @@ export function ArticleReader({
                   canGoPrev={pageNavState.canPrev}
                   canGoNext={pageNavState.canNext}
                   className="z-[45]"
+                  visible={showNavButtons}
+                  einkMode={einkMode}
                 />
               )}
 
@@ -1141,7 +1164,7 @@ export function ArticleReader({
             ref={scrollRef}
             tabIndex={-1}
             className={cn(
-              'h-full min-w-0 outline-none',
+              'h-full min-w-0 outline-none relative',
               isPaginated
                 ? 'overflow-x-hidden overflow-y-hidden overscroll-x-contain'
                 : 'overflow-y-auto'
@@ -1156,6 +1179,7 @@ export function ArticleReader({
             <ArticleContent 
               entry={entry} 
               effectiveColumnCount={effectiveColumnCount}
+                paginatedTrailingBlankColumns={trailingBlankColumns}
               className={cn(isPaginated && 'h-full')}
               isReaderViewControlled={isReaderView}
               isLoadingReaderControlled={isLoadingReader}
@@ -1164,6 +1188,9 @@ export function ArticleReader({
               fetchError={fetchError}
               onRetryFetch={handleRetryFetch}
             />
+            {isPaginated && (
+              <div aria-hidden="true" style={{ position: 'absolute', top: 0, left: 0, width: 'var(--article-scroll-width, 100%)', height: '1px', pointerEvents: 'none' }} />
+            )}
           </article>
 
           {isPaginated && (
@@ -1173,6 +1200,8 @@ export function ArticleReader({
               canGoPrev={pageNavState.canPrev}
               canGoNext={pageNavState.canNext}
               className="z-[35]"
+              visible={showNavButtons}
+              einkMode={einkMode}
             />
           )}
 

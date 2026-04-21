@@ -92,6 +92,7 @@ interface SettingsState {
   // Behavior
   confirmMarkAllRead: boolean; // Ask before marking all as read
   showReadingTime: boolean;    // Show estimated reading time on articles
+  readerToolbarHideDelay: number; // Seconds before reader toolbars/nav buttons auto-hide (1-30)
   
   // Actions
   setTheme: (theme: Theme) => void;
@@ -119,6 +120,7 @@ interface SettingsState {
   setRecentOfflineMagazinesLimit: (limit: number) => void;
   setConfirmMarkAllRead: (v: boolean) => void;
   setShowReadingTime: (v: boolean) => void;
+  setReaderToolbarHideDelay: (seconds: number) => void;
   resetSettings: () => void;
 }
 
@@ -147,6 +149,7 @@ const DEFAULT_SETTINGS = {
   recentOfflineMagazinesLimit: 3,
   confirmMarkAllRead: true,
   showReadingTime: true,
+  readerToolbarHideDelay: 4,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -189,6 +192,7 @@ export const useSettingsStore = create<SettingsState>()(
       setRecentOfflineMagazinesLimit: (limit) => set({ recentOfflineMagazinesLimit: Math.max(0, Math.min(20, Math.round(limit))) }),
       setConfirmMarkAllRead: (v) => set({ confirmMarkAllRead: v }),
       setShowReadingTime: (v) => set({ showReadingTime: v }),
+      setReaderToolbarHideDelay: (seconds) => set({ readerToolbarHideDelay: Math.max(1, Math.min(30, Math.round(seconds))) }),
       
       resetSettings: () => set(DEFAULT_SETTINGS),
     }),
@@ -226,6 +230,7 @@ export const useSettingsStore = create<SettingsState>()(
           einkDebugPanelEnabled: persistedState.einkDebugPanelEnabled ?? DEFAULT_SETTINGS.einkDebugPanelEnabled,
           recentOfflineBooksLimit: persistedState.recentOfflineBooksLimit ?? DEFAULT_SETTINGS.recentOfflineBooksLimit,
           recentOfflineMagazinesLimit: persistedState.recentOfflineMagazinesLimit ?? DEFAULT_SETTINGS.recentOfflineMagazinesLimit,
+          readerToolbarHideDelay: persistedState.readerToolbarHideDelay ?? DEFAULT_SETTINGS.readerToolbarHideDelay,
         };
       },
     }

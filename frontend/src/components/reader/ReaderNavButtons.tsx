@@ -5,6 +5,7 @@
  * Shown on all screen sizes when the controls overlay is visible.
  */
 
+import type { CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -14,6 +15,9 @@ interface ReaderNavButtonsProps {
   canGoPrev: boolean;
   canGoNext: boolean;
   className?: string;
+  /** When false the buttons become invisible and non-interactive (auto-hide) */
+  visible?: boolean;
+  einkMode?: boolean;
 }
 
 export function ReaderNavButtons({
@@ -22,12 +26,20 @@ export function ReaderNavButtons({
   canGoPrev,
   canGoNext,
   className,
+  visible = true,
+  einkMode = false,
 }: ReaderNavButtonsProps) {
+  const visibilityStyle: CSSProperties = {
+    opacity: visible ? 1 : 0,
+    pointerEvents: visible ? 'auto' : 'none',
+    transition: einkMode ? 'none' : 'opacity 0.3s ease',
+  };
   return (
     <>
       <button
         onClick={onPrev}
         disabled={!canGoPrev}
+        style={visibilityStyle}
         className={cn(
           'absolute left-4 top-1/2 -translate-y-1/2',
           'p-3 rounded-full transition-all',
@@ -48,6 +60,7 @@ export function ReaderNavButtons({
       <button
         onClick={onNext}
         disabled={!canGoNext}
+        style={visibilityStyle}
         className={cn(
           'absolute right-4 top-1/2 -translate-y-1/2',
           'p-3 rounded-full transition-all',

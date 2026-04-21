@@ -148,7 +148,8 @@ export function PDFViewer({
   const [showControls, setShowControls] = useState(true);
   const [controlsTick, setControlsTick] = useState(0);
 
-  useAutoHideControls(showControls, setShowControls, isLoading);
+  const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
+  useAutoHideControls(showControls, setShowControls, isLoading, readerToolbarHideDelay * 1000);
 
   // Ad detection state
   const [adPages, setAdPagesState] = useState<Set<number>>(new Set());

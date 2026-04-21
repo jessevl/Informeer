@@ -129,10 +129,19 @@ async function generateAndroidIcons(sourceBuffer, noBackdropBuffer, outlineBuffe
     const dir = join(androidResDir, `mipmap-${density}`);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    // ic_launcher.png — full icon with background (for legacy Android < 26, squircle/square clip)
+    // ic_launcher.png — full icon with background (for legacy Android < 26, squircle/square clip).
+    // Scale to 72 % and add padding so the logo isn't clipped by the rounded-square mask.
     const launcherOut = join(dir, 'ic_launcher.png');
-    console.log(`Android: ${launcherOut} (${launcherPx}×${launcherPx})`);
-    await sharp(sourceBuffer).resize(launcherPx, launcherPx).png().toFile(launcherOut);
+    console.log(`Android: ${launcherOut} (${launcherPx}\u00d7${launcherPx})`);
+    const legacyInner = Math.round(launcherPx * 0.72);
+    const legacyPad   = Math.round((launcherPx - legacyInner) / 2);
+    const legacyInnerBuf = await sharp(sourceBuffer).resize(legacyInner, legacyInner).png().toBuffer();
+    await sharp({
+      create: { width: launcherPx, height: launcherPx, channels: 4, background: { r: 253, g: 246, b: 244, alpha: 1 } },
+    })
+      .composite([{ input: legacyInnerBuf, left: legacyPad, top: legacyPad }])
+      .png()
+      .toFile(launcherOut);
 
     // ic_launcher_round.png — used when the launcher clips to a circle.
     // The icon content must fit within the inscribed circle, so we scale the
@@ -155,8 +164,10 @@ async function generateAndroidIcons(sourceBuffer, noBackdropBuffer, outlineBuffe
     if (noBackdropBuffer) {
       const foregroundOut = join(dir, 'ic_launcher_foreground.png');
       console.log(`Android: ${foregroundOut} (${foregroundPx}×${foregroundPx})`);
-      // Scale icon to ~80% of foreground canvas to keep it within the safe zone
-      const iconPx = Math.round(foregroundPx * 0.8);
+      // Scale icon to ~60% of foreground canvas to keep it well within the adaptive-icon
+      // safe zone (the central 61% of the 108dp canvas guaranteed not to be clipped).
+      // 80% was previously used, which extended outside the safe zone causing logo cutoff.
+      const iconPx = Math.round(foregroundPx * 0.60);
       const padding = Math.round((foregroundPx - iconPx) / 2);
       const iconBuf = await sharp(noBackdropBuffer).resize(iconPx, iconPx).png().toBuffer();
       await sharp({
@@ -189,7 +200,7 @@ async function generateAndroidIcons(sourceBuffer, noBackdropBuffer, outlineBuffe
       // ic_launcher_eink_foreground.png — outline icon centered in foreground canvas
       const einkForegroundOut = join(dir, 'ic_launcher_eink_foreground.png');
       console.log(`Android: ${einkForegroundOut} (${foregroundPx}×${foregroundPx})`);
-      const iconPx = Math.round(foregroundPx * 0.8);
+      const iconPx = Math.round(foregroundPx * 0.60);
       const padding = Math.round((foregroundPx - iconPx) / 2);
       const einkIconBuf = await sharp(outlineBuffer).resize(iconPx, iconPx).png().toBuffer();
       await sharp({

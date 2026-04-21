@@ -75,6 +75,8 @@ const AppearanceSection: React.FC = () => {
   const setConfirmMarkAllRead = useSettingsStore((s) => s.setConfirmMarkAllRead);
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
   const setShowReadingTime = useSettingsStore((s) => s.setShowReadingTime);
+  const readerToolbarHideDelay = useSettingsStore((s) => s.readerToolbarHideDelay);
+  const setReaderToolbarHideDelay = useSettingsStore((s) => s.setReaderToolbarHideDelay);
 
   // Auto accent label depends on variant
   const autoLabel = themeVariant === 'warm' ? 'coral' : 'blue';
@@ -128,6 +130,19 @@ const AppearanceSection: React.FC = () => {
           description="Show the floating sleep and wake diagnostics panel"
           enabled={einkDebugPanelEnabled}
           onChange={setEinkDebugPanelEnabled}
+        />
+      )}
+
+      {einkMode && (
+        <SliderRow
+          label="Toolbar Hide Delay"
+          description="Seconds before reader toolbars and navigation buttons auto-hide"
+          value={readerToolbarHideDelay}
+          min={1}
+          max={30}
+          step={1}
+          formatValue={(v) => `${v}s`}
+          onChange={setReaderToolbarHideDelay}
         />
       )}
 

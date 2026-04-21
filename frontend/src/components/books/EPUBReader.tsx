@@ -213,8 +213,12 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const epubLightTheme = useSettingsStore(s => s.epubLightTheme);
   const epubDarkTheme = useSettingsStore(s => s.epubDarkTheme);
   const recentOfflineBooksLimit = useSettingsStore(s => s.recentOfflineBooksLimit);
+  const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   const offlineRegistry = useOfflineRegistry();
   const isLandscapeViewport = useIsLandscapeViewport();
+  // Enable spread view in landscape OR when the device is tablet-wide in portrait
+  // (width ≥ 600 CSS px covers most eink tablets but excludes phones ~360-430 px)
+  const isSpreadEligible = isLandscapeViewport || window.innerWidth >= 600;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(
@@ -240,7 +244,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // --- Auto-hide toolbar ---
   const [controlsTick, setControlsTick] = useState(0);
 
-  useAutoHideControls(showControls, setShowControls, showToc || showTypography || isLoading);
+  useAutoHideControls(showControls, setShowControls, showToc || showTypography || isLoading, readerToolbarHideDelay * 1000);
 
   // --- Progress tracking for remote sync ---
   const chapterRef = useRef(initialProgress.chapter);
@@ -305,11 +309,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   useEffect(() => {
     if (!manualSpreadPreferenceRef.current) {
-      const cols: 1 | 2 = isLandscapeViewport ? 2 : 1;
-      setIsSpreadView(isLandscapeViewport);
+      const cols: 1 | 2 = isSpreadEligible ? 2 : 1;
+      setIsSpreadView(isSpreadEligible);
       setTypography(prev => ({ ...prev, columnCount: cols }));
     }
-  }, [isLandscapeViewport]);
+  }, [isSpreadEligible]);
 
   // On E-ink, wake the device briefly on orientation change so the screen
   // can reflow and repaint at the new orientation before re-hibernating.
@@ -321,7 +325,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     startEinkWork('orientation');
     const safety = setTimeout(() => { void finishEinkWork(true); }, 3000);
     return () => clearTimeout(safety);
-  }, [isLandscapeViewport, einkMode, startEinkWork, finishEinkWork]);
+  }, [isSpreadEligible, einkMode, startEinkWork, finishEinkWork]);
 
   const remoteSync = useRemoteProgressSync({
     enabled: !isLoading && locationsReady,
@@ -655,10 +659,28 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             }, 1500);
           }
 
-          void finishEinkWork(true);
+          // Wait for all images in the current view to load before letting
+          // the eink bridge hibernate.  This prevents partial-render freezes on
+          // high-resolution eink panels where image decompression can lag behind
+          // the layout-complete signal.  A 2-second cap avoids infinite waits
+          // for missing or slow-loading images.
+          const views: any[] = (renditionRef.current as any)?.views()?._views ?? [];
+          const imgs: HTMLImageElement[] = [];
+          for (const v of views) {
+            const d = v?.document as Document | undefined;
+            if (d) imgs.push(...Array.from(d.querySelectorAll('img')) as HTMLImageElement[]);
+          }
+          const pending = imgs.filter(img => !img.complete || img.naturalWidth === 0);
+          const imagesReady = pending.length === 0
+            ? Promise.resolve()
+            : Promise.all(pending.map(img => new Promise<void>(resolve => {
+                img.addEventListener('load', () => resolve(), { once: true });
+                img.addEventListener('error', () => resolve(), { once: true });
+              })));
+          void Promise.race([imagesReady, new Promise<void>(r => setTimeout(r, 2000))])
+            .then(() => { void finishEinkWork(true); });
         });
 
-        // Click and keyboard events are handled directly on the iframe
         // document inside the content hook below. We don't use
         // rendition.on('click') / rendition.on('keydown') because
         // epubjs's event forwarding chain doesn't fire in Safari
@@ -669,6 +691,13 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         // container, so we must handle them directly on the iframe document.
         // This is critical for iPad/touch devices where all interactions happen
         // inside the epub iframe.
+
+        // Shared wheel state across all iframes (spread mode has two iframes;
+        // separate cooldowns per-iframe would allow double page turns on one swipe).
+        let sharedWheelAccX = 0;
+        let sharedWheelTimer: any = null;
+        let sharedWheelCooldown = false;
+
         rendition.hooks.content.register((contents: Contents) => {
           const doc = (contents as any).document as Document;
           if (!doc) return;
@@ -750,28 +779,26 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             }
           });
 
-          // Forward trackpad/mouse wheel events for gesture handling (page turns)
-          let wheelAccX = 0;
-          let wheelTimer: any = null;
-          let wheelCooldown = false;
-
+          // Forward trackpad/mouse wheel events for gesture handling (page turns).
+          // Uses shared state (sharedWheelAccX/Cooldown) so spread mode's two
+          // iframes cannot each independently trigger a page turn on one gesture.
           doc.addEventListener('wheel', (e: WheelEvent) => {
             if (e.ctrlKey || e.metaKey) return;
-            if (wheelCooldown) { wheelAccX = 0; return; }
+            if (sharedWheelCooldown) { sharedWheelAccX = 0; return; }
             if (Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.8 && Math.abs(e.deltaX) > 2) {
               e.preventDefault();
-              wheelAccX += e.deltaX;
-              if (wheelTimer) clearTimeout(wheelTimer);
-              wheelTimer = setTimeout(() => { wheelAccX = 0; }, 400);
+              sharedWheelAccX += e.deltaX;
+              if (sharedWheelTimer) clearTimeout(sharedWheelTimer);
+              sharedWheelTimer = setTimeout(() => { sharedWheelAccX = 0; }, 400);
               const threshold = 150;
-              if (wheelAccX > threshold) {
-                wheelAccX = 0; wheelCooldown = true;
+              if (sharedWheelAccX > threshold) {
+                sharedWheelAccX = 0; sharedWheelCooldown = true;
                 nextPageRef.current();
-                setTimeout(() => { wheelCooldown = false; wheelAccX = 0; }, 1000);
-              } else if (wheelAccX < -threshold) {
-                wheelAccX = 0; wheelCooldown = true;
+                setTimeout(() => { sharedWheelCooldown = false; sharedWheelAccX = 0; }, 1000);
+              } else if (sharedWheelAccX < -threshold) {
+                sharedWheelAccX = 0; sharedWheelCooldown = true;
                 prevPageRef.current();
-                setTimeout(() => { wheelCooldown = false; wheelAccX = 0; }, 1000);
+                setTimeout(() => { sharedWheelCooldown = false; sharedWheelAccX = 0; }, 1000);
               }
             }
           }, { passive: false });
@@ -1255,10 +1282,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         )}
 
         {/* Floating status pill — page position + reading time. Shows when controls are HIDDEN */}
-        {!isLoading && (totalPagesOverall > 0 || minutesLeftBook > 0) && (
+        {!isLoading && (totalPagesOverall > 0 || minutesLeftBook > 0 || percentage > 0) && (
           <div
             className={cn(
-              'absolute bottom-3 left-4 z-10',
+              'absolute bottom-3 left-1/2 -translate-x-1/2 z-10',
               'flex items-center gap-1.5 px-2.5 py-1 rounded-full',
               'bg-[var(--color-surface-primary)]/70 backdrop-blur-sm',
               'border border-[var(--color-border-subtle)]',
@@ -1272,8 +1299,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
               transform: einkMode ? 'none' : (showControls ? 'translateY(8px)' : 'translateY(0)'),
             }}
           >
-            {totalPagesOverall > 0 && (
+            {totalPagesOverall > 0 ? (
               <span className="tabular-nums">{currentPageOverall} / {totalPagesOverall}</span>
+            ) : (
+              <span className="tabular-nums">{Math.round(percentage * 100)}%</span>
             )}
             {totalPagesOverall > 0 && minutesLeftBook > 0 && (
               <span className="opacity-40">·</span>
@@ -1303,6 +1332,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       />
 
       {/* ─── Bottom progress bar (overlay) ─── */}
+      {/* Only visible when controls are shown (tap to reveal), just like the nav buttons */}
       <div
         className="absolute bottom-0 left-0 right-0 z-20"
         style={{

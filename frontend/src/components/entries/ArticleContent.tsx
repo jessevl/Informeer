@@ -286,8 +286,8 @@ export function ArticleContent({
         columnFill: 'auto',
         height: '100%',
         maxWidth: 'none',
-        boxSizing: 'border-box',
-        paddingRight: 'var(--article-page-trailing-px-spacer, 0px)',
+        width: '100%',
+        boxSizing: 'content-box',
         paddingTop: PAGINATED_HEADER_OFFSET,
         paddingBottom: PAGINATED_BOTTOM_MARGIN,
       }
@@ -593,13 +593,18 @@ export function ArticleContent({
               </>
             )}
             {articleHtml}
+            {isPaginated && (
+              <div aria-hidden="true" style={{ display: 'block', width: '100%', height: '1px', clear: 'both', visibility: 'hidden', fontSize: '1px', lineHeight: '1px' }}>&nbsp;</div>
+            )}
             {isPaginated && paginatedTrailingBlankColumns > 0 && Array.from({ length: paginatedTrailingBlankColumns }).map((_, index) => (
               <div
                 key={`article-trailing-column-${index}`}
                 aria-hidden="true"
                 data-article-trailing-spacer
-                style={{ breakBefore: 'column', height: '100%' }}
-              />
+                style={{ breakBefore: 'column', display: 'block', width: '100%', height: '1px', visibility: 'hidden', fontSize: '1px', lineHeight: '1px' }}
+              >
+                &nbsp;
+              </div>
             ))}
           </div>
         </div>
