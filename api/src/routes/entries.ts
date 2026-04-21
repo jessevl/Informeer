@@ -141,7 +141,9 @@ entries.get('/v1/entries/:id/fetch-content', async (c) => {
 
   // If content was already extracted and stored during sync, return it immediately.
   // This avoids re-fetching on every article open when crawler mode is enabled.
-  if (row.content_fetched) {
+  // Pass ?force=true to bypass the cache and re-extract even for pre-fetched content.
+  const forceRefetch = c.req.query('force') === 'true';
+  if (row.content_fetched && !forceRefetch) {
     return c.json({ content: row.content });
   }
 

@@ -168,7 +168,7 @@ function CardItem({
   const [imageError, setImageError] = useState(false);
   const isUnread = entry.status === 'unread';
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
-  const imageUrl = showImages ? extractFirstImage(entry.content) : null;
+  const imageUrl = showImages ? (entry.image_url || extractFirstImage(entry.content)) : null;
   const excerpt = getExcerpt(entry.content, excerptLines * 60);
   
   const { audioEnclosure, videoInfo, isPodcast, isVideo, thumbnailUrl, progressPercent, hasProgress } = useMediaProgress(entry);
@@ -345,7 +345,7 @@ function MagazineItem({
   const [imageError, setImageError] = useState(false);
   const isUnread = entry.status === 'unread';
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
-  const imageUrl = showImages ? extractFirstImage(entry.content) : null;
+  const imageUrl = showImages ? (entry.image_url || extractFirstImage(entry.content)) : null;
   const { audioEnclosure, videoInfo, isPodcast, isVideo, thumbnailUrl, progressPercent, hasProgress } = useMediaProgress(entry);
   const displayThumb = !imageError ? (thumbnailUrl || imageUrl) : null;
   

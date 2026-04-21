@@ -186,10 +186,33 @@ export function ArticleReader({
     };
   }, [shouldAutoFetch, entry.id, autoFetched, readerContent, isLoadingReader, startEinkWork, finishEinkWork]);
   
-  // Toggle reader view
+  // Toggle reader view.
+  // – Not in reader view, no cached content → fetch fresh
+  // – Not in reader view, cached content → show cached
+  // – Already in reader view → force re-fetch from server (runs extraction again)
+  //   This lets users manually refresh stale or poorly-extracted content.
   const handleToggleReaderView = useCallback(async () => {
     if (isLoadingReader) return;
-    if (isReaderView) { setIsReaderView(false); return; }
+
+    if (isReaderView) {
+      // Re-fetch with force=true to re-run readability / extraction pipeline
+      const workTag = startEinkWork('reader-view-refresh');
+      setIsLoadingReader(true);
+      setFetchError(null);
+      try {
+        const fullEntry = await api.fetchOriginalContent(entry.id, true);
+        setReaderContent(fullEntry.content);
+        // Stay in reader view – just update the content
+      } catch (e) {
+        console.error('Failed to refresh reader view:', e);
+        setFetchError('Could not refresh article content');
+      } finally {
+        finishEinkWork(workTag);
+        setIsLoadingReader(false);
+      }
+      return;
+    }
+
     if (readerContent) { setIsReaderView(true); return; }
 
     const workTag = startEinkWork('reader-view-fetch');

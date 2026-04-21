@@ -73,14 +73,17 @@ const PREDEFINED_RULES: Record<string, string> = {
   'techcrunch.com':       'div.entry-content',
   'theoatmeal.com':       'div#comic',
   'theregister.com':      '#top-col-story h2, #body',
+  // Wired (Condé Nast) uses CSS-in-JS randomised class names that rotate on deploy;
+  // data-testid attributes are stable. BodyWrapper targets the actual article prose.
   'theverge.com':         'h2.inline:nth-child(2),h2.duet--article--dangerously-set-cms-markup,figure.w-full,div.duet--article--article-body-component',
+  'wired.com':            '[data-testid="BodyWrapper"]',
+  'wired.co.uk':          '[data-testid="BodyWrapper"]',
   'turnoff.us':           'article.post-content',
   'universfreebox.com':   '#corps_corps',
   'version2.dk':          'section.body',
   'vnexpress.net':        '.detail-new p.description, article.fck_detail',
   'wdwnt.com':            'div.entry-content',
   'webtoons.com':         '.viewer_img,p.author_text',
-  'wired.com':            'article',
   'zeit.de':              '.summary, .article-body',
   'zdnet.com':            'div.storyBody',
   // Additional Dutch news sites
@@ -94,6 +97,8 @@ const PREDEFINED_RULES: Record<string, string> = {
   'nrc.nl':               '.article__content',
   'trouw.nl':             'article .article__body',
   'nytimes.com':          'section[name="articleBody"], .article-body, .StoryBodyCompact, section[data-testid="body-interior"]',
+  'nationalgeographic.com': '[data-testid="prism-article-body"]',
+  'nationalgeographic.org': '[data-testid="prism-article-body"]',
 };
 
 /**
@@ -155,6 +160,36 @@ const REMOVE_SELECTORS = [
   '.css-1bd8bfl', // NYT subscription banner class (changes but worth trying)
   '[class*="Paywall"]', '[class*="paywall"]',
   '[class*="Gateway"]', '[class*="gateway"]',
+  // Wired (Condé Nast) – article header contains duplicate title/byline/hero image,
+  // action bar has save/share buttons, and paywall inline barriers should all go
+  '[data-testid="SplitScreenContentHeaderWrapper"]',
+  '[data-testid="ContentHeaderWrapper"]',
+  '[data-testid="action-bar-wrapper"]',
+  '[data-testid*="PaywallInline"]',
+  '[data-testid*="PaywallBarrier"]',
+  // Wired mid-article ad + promo slots injected as empty divs (JS fills them client-side)
+  '[role="presentation"][aria-hidden="true"]',
+  // NRC.nl Bison design-system web components
+  'dmt-icon',
+  'dmt-util-bar',
+  'dmt-share-widget',
+  'dmt-inline-article-widget',
+  // NYT – accessibility label span inside lazy-image wrappers (renders as literal "Image" text)
+  '[data-testid="photoviewer-children-figure"] > span',
+  // NatGeo – expand-image buttons and related chrome inside article figures
+  '[data-testid="prism-ImageViewer_ExpandButton"]',
+  '[data-testid="prism-editors-note"]',
+  '[data-testid="prism-tags"]',
+  '[data-testid="prism-share"]',
+  // NatGeo – "You May Also Like" related-content blocks
+  '[data-testid="prism-card-grid"]',
+  '[data-testid="prism-collection"]',
+  // Generic "load more" / pagination controls
+  '[class*="load-more"]', '[id*="load-more"]',
+  '[class*="loadmore"]',  '[id*="loadmore"]',
+  // Print / reading-progress chrome
+  '[class*="progress-bar"]', '[id*="progress-bar"]',
+  '[class*="reading-progress"]',
 ];
 
 // ---------------------------------------------------------------------------
@@ -168,7 +203,16 @@ function preProcessHtml(html: string): string {
   let clean = html;
   clean = clean.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   clean = clean.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
-  clean = clean.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
+  // Before stripping <noscript> elements, extract any <img> tags they contain.
+  // Many sites (NYT, WaPo, etc.) use <noscript> as a no-JS fallback for lazy-loaded
+  // images — the actual src lives there while JS renders into an empty sibling div.
+  clean = clean.replace(/<noscript\b[^>]*>([\s\S]*?)<\/noscript>/gi, (_match: string, inner: string) => {
+    const imgs: string[] = [];
+    const pat = /<img\b[^>]*\bsrc=["'][^"']+["'][^>]*\/?>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = pat.exec(inner)) !== null) imgs.push(m[0]);
+    return imgs.join('');
+  });
   clean = clean.replace(/<!--[\s\S]*?-->/g, '');
   return clean;
 }
@@ -269,10 +313,213 @@ function extractSiteNameMeta(document: any): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Selectors to try for an article standfirst / dek / subtitle.
+ * Checked in order; first non-empty match wins.
+ */
+const DEK_SELECTORS = [
+  // Wired / Condé Nast – data-testid is stable even when class names rotate
+  '[data-testid*="Dek"]', '[data-testid*="dek"]',
+  // New York Times – article-summary holds the standfirst/dek
+  '[data-testid="article-summary"]', '[data-testid="article-header-summary"]',
+  // Generic semantic names used by many CMSes
+  '.article-standfirst', '.standfirst',
+  '.article-dek', '.article-deck', '.dek', '.deck',
+  '.article-summary', '.article-subtitle', '.article-intro',
+  '.entry-summary', '.intro', '.lead',
+  '[itemprop="description"]',
+];
+
+/**
+ * Extract an article dek / standfirst from the document.
+ * Returns the plain text or empty string.
+ */
+function extractDek(document: any): string {
+  for (const sel of DEK_SELECTORS) {
+    try {
+      const el = document.querySelector(sel);
+      const text = el?.textContent?.trim();
+      if (text && text.length > 15 && text.length < 500) return text;
+    } catch { /* skip */ }
+  }
+  return '';
+}
+
+/**
+ * Wrap bare <img> elements in <figure> tags and extract captions from:
+ *  - WordPress data-image-caption attribute
+ *  - Non-trivial alt text (if no other caption source)
+ * Cleans up WordPress data-* noise attributes from img tags.
+ */
+function wrapImagesInFigures(html: string): string {
+  const { document } = parseHTML(html);
+
+  // WordPress attribute names that contain caption data or noisy metadata
+  const WP_CAPTION_ATTRS = ['data-image-caption', 'data-image-description'];
+  const WP_NOISE_ATTRS = [
+    'data-attachment-id', 'data-permalink', 'data-orig-file',
+    'data-orig-size', 'data-comments-opened', 'data-image-meta',
+    'data-image-title', 'data-image-description', 'data-image-caption',
+    'data-medium-file', 'data-large-file',
+  ];
+
+  for (const img of Array.from(document.querySelectorAll('img'))) {
+    // Extract WordPress caption (strip inner HTML to plain text)
+    let captionText = '';
+    for (const attr of WP_CAPTION_ATTRS) {
+      const val = (img as any).getAttribute(attr) || '';
+      if (!val) continue;
+      // The caption attribute may itself be HTML (e.g. "<p>Illustration of …</p>")
+      try {
+        const { document: capDoc } = parseHTML(val);
+        const text = capDoc.body?.textContent?.trim() || '';
+        if (text.length > 3) { captionText = text; break; }
+      } catch { captionText = val.replace(/<[^>]+>/g, '').trim(); break; }
+    }
+
+    // Fallback: use meaningful alt text as caption
+    if (!captionText) {
+      const alt = (img as any).getAttribute('alt')?.trim() || '';
+      if (
+        alt.length > 5 &&
+        alt.toLowerCase() !== 'image' &&
+        !alt.toLowerCase().startsWith('image may contain') &&
+        alt.toLowerCase() !== 'photo'
+      ) {
+        captionText = alt;
+      }
+    }
+
+    // Clean WordPress data-* noise from the img tag
+    for (const attr of WP_NOISE_ATTRS) {
+      try { (img as any).removeAttribute(attr); } catch {}
+    }
+
+    const parent: any = (img as any).parentElement;
+    // Walk up the tree — NYT and others nest <img> several divs inside <figure>
+    let ancestorFigure: any = parent;
+    while (ancestorFigure && ancestorFigure.tagName?.toLowerCase() !== 'figure') {
+      ancestorFigure = ancestorFigure.parentElement;
+    }
+
+    if (ancestorFigure) {
+      // Add a figcaption if the figure doesn't have one yet
+      if (captionText && !(ancestorFigure as any).querySelector('figcaption')) {
+        const caption = document.createElement('figcaption');
+        (caption as any).textContent = captionText;
+        ancestorFigure.appendChild(caption);
+      }
+      continue;
+    }
+
+    // Wrap the img (or its wrapping <a>) in a <figure>
+    const childToWrap = parent?.tagName?.toLowerCase() === 'a' ? parent : img;
+    const grandParent: any = (childToWrap as any).parentElement;
+
+    const figure = document.createElement('figure');
+    try {
+      grandParent?.insertBefore(figure, childToWrap);
+      figure.appendChild(childToWrap);
+    } catch { continue; }
+
+    if (captionText) {
+      const caption = document.createElement('figcaption');
+      (caption as any).textContent = captionText;
+      figure.appendChild(caption);
+    }
+
+    // If the previous container <p> is now empty, remove it
+    if (grandParent?.tagName?.toLowerCase() === 'p') {
+      const pText = grandParent?.textContent?.trim() || '';
+      if (!pText) grandParent.remove();
+    }
+  }
+
+  return (document.body as any)?.innerHTML || html;
+}
+
+/**
+ * Flatten divs/sections that serve only as structural containers (no direct
+ * text nodes; all children are block-level). Publishers like NatGeo wrap each
+ * paragraph group and each figure in separate divs, which prevents CSS float
+ * text-wrapping at display time. Flattening here so the cached content is
+ * already structured correctly.
+ */
+function flattenContainerDivs(html: string): string {
+  const { document } = parseHTML(html);
+
+  const BLOCK_TAGS = new Set([
+    'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'figure', 'blockquote', 'ul', 'ol', 'li', 'pre', 'table',
+    'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'dl', 'dt', 'dd',
+    'div', 'section', 'aside', 'details', 'summary', 'header', 'footer',
+  ]);
+
+  let changed = true;
+  let passes = 0;
+  while (changed && passes < 12) {
+    changed = false;
+    passes++;
+    const candidates = (document as any).querySelectorAll('div, section');
+    for (const div of Array.from(candidates)) {
+      // Keep divs with direct text content
+      const hasDirectText = Array.from((div as any).childNodes).some(
+        (n: any) => n.nodeType === 3 && (n.textContent || '').trim().length > 0
+      );
+      if (hasDirectText) continue;
+      const children = Array.from((div as any).children) as any[];
+      if (children.length === 0) continue;
+      if (!children.every((c: any) => BLOCK_TAGS.has(c.tagName?.toLowerCase()))) continue;
+      const parent: any = (div as any).parentElement;
+      if (!parent) continue;
+      while ((div as any).firstChild) parent.insertBefore((div as any).firstChild, div);
+      (div as any).remove();
+      changed = true;
+    }
+  }
+
+  return (document.body as any)?.innerHTML || html;
+}
+
+/**
+ * Convert non-standard caption containers inside <figure> elements to
+ * proper <figcaption> elements. Many publishers (NatGeo, Getty, etc.) use
+ * divs with data-testid or class names containing "caption" instead of the
+ * semantic <figcaption> tag. This runs before wrapImagesInFigures so the
+ * latter sees proper figcaption elements when deciding whether to add one.
+ */
+function normalizeFigureCaptions(html: string): string {
+  const { document } = parseHTML(html);
+
+  const figures = (document as any).querySelectorAll('figure');
+  for (const figure of Array.from(figures)) {
+    // Skip if a real figcaption already exists
+    if ((figure as any).querySelector('figcaption')) continue;
+
+    // Look for vendor caption containers: data-testid*=caption, .caption, [class*=caption]
+    const captionEl = (figure as any).querySelector(
+      '[data-testid*="caption"], [data-testid*="Caption"], .caption, [class*="caption"]'
+    );
+    if (!captionEl) continue;
+
+    const text = (captionEl as any).textContent?.trim() || '';
+    if (text.length < 3) { (captionEl as any).remove(); continue; }
+
+    const fc = document.createElement('figcaption');
+    (fc as any).textContent = text;
+    (captionEl as any).replaceWith(fc);
+  }
+
+  return (document.body as any)?.innerHTML || html;
+}
+
+/**
  * Post-process extracted content:
  * - Sanitize HTML
  * - Resolve relative URLs to absolute
  * - Resolve lazy-loaded images
+ * - Flatten structural container divs for proper float text-wrap
+ * - Normalize vendor caption containers to <figcaption>
+ * - Wrap images in <figure> tags with captions
  * - Remove empty/useless elements
  */
 function postProcessContent(html: string, url: string): string {
@@ -286,6 +533,16 @@ function postProcessContent(html: string, url: string): string {
 
   // Sanitize (remove scripts, event handlers)
   content = sanitizeHtml(content);
+
+  // Flatten structural container divs (NatGeo, etc.) so figures and paragraphs
+  // become siblings — a prerequisite for CSS float text-wrapping
+  content = flattenContainerDivs(content);
+
+  // Convert vendor caption divs (data-testid*=caption etc.) to <figcaption>
+  content = normalizeFigureCaptions(content);
+
+  // Wrap images in figures and extract captions
+  content = wrapImagesInFigures(content);
 
   // Remove empty paragraphs and divs
   content = content.replace(/<(p|div|span)\b[^>]*>\s*<\/\1>/gi, '');
@@ -616,12 +873,22 @@ export async function extractContent(url: string, opts?: FeedExtractOptions): Pr
   const metaDescription = extractMetaDescription(document);
   const metaSiteName = extractSiteNameMeta(document);
 
+  // Remove noise elements before any extraction strategy so that selector
+  // extraction (Strategy 1) returns clean innerHTML — without related-content
+  // blocks, share widgets, etc. that live inside the article container.
+  // Strategy 2 (Readability) re-parses from cleanHtml so it is unaffected.
+  removeNoiseElements(document);
+
   // Strategy 1: Try CSS selector extraction (per-feed custom rules → predefined rules)
   let content = trySelectorExtraction(document, hostname, opts?.scraperRules);
   let title = '';
   let author = '';
   let excerpt = '';
   let siteName = metaSiteName;
+
+  // Try to extract the dek/standfirst from the page before we mutate the DOM.
+  // This picks up Wired-style [data-testid*="Dek"] elements and generic .standfirst etc.
+  const pageDek = extractDek(document);
 
   // Strategy 2: Fall back to Readability on a FRESH document parse.
   // Important: Readability mutates the DOM and depends on structural elements
@@ -654,9 +921,8 @@ export async function extractContent(url: string, opts?: FeedExtractOptions): Pr
     }
   }
 
-  // Strategy 3: If Readability returned nothing, remove noise and try broader selectors
+  // Strategy 3: If Readability returned nothing, try broader selectors
   if (!content) {
-    removeNoiseElements(document);
     const fallbackSelectors = [
       '.post-content', '.entry-content', '.article-body', '.story-body',
       'article', 'main', '[role="main"]', '#content',
@@ -697,6 +963,18 @@ export async function extractContent(url: string, opts?: FeedExtractOptions): Pr
   if (!content) {
     log.debug('Post-processed content was empty', { url: finalUrl });
     return null;
+  }
+
+  // Prepend article standfirst/dek if available and not already in content.
+  // Priority: explicit dek selector > Readability excerpt > og:description
+  const standfirstText = pageDek || excerpt;
+  if (standfirstText && standfirstText.length > 20) {
+    // Avoid duplication: only prepend if the text doesn't appear near the start
+    const earlyContent = content.slice(0, 600);
+    if (!earlyContent.toLowerCase().includes(standfirstText.toLowerCase().slice(0, 40))) {
+      const escaped = standfirstText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      content = `<p class="article-standfirst" data-standfirst="1">${escaped}</p>\n${content}`;
+    }
   }
 
   // Extract lead image.

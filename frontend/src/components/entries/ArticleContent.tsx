@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { cn, formatRelativeTime, formatReadingTime, isYouTubeUrl, extractYouTubeId, sanitizeArticleHtml, stripYouTubeEmbeds } from '@/lib/utils';
+import { cn, formatRelativeTime, formatReadingTime, isYouTubeUrl, extractYouTubeId, sanitizeArticleHtml, stripYouTubeEmbeds, removeFirstImageFromContent } from '@/lib/utils';
 import { Play, ListPlus, Loader2, AlertTriangle, RotateCcw } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { FeedIcon } from '@/components/feeds/FeedIcon';
@@ -205,8 +205,18 @@ export function ArticleContent({
   // Use reader content if active, otherwise original
   const displayContent = isReaderView && readerContent ? readerContent : originalContent;
   
+  // Cover image: shown only when not a YouTube/video article.
+  // When displayed, strip any duplicate first image from the content so we don't
+  // show the same photo twice (common for Hackaday WordPress articles etc.).
+  const coverImageUrl = (!youtubeId && !videoEnclosure && entry.image_url) ? entry.image_url : null;
+  
   // Strip social-share widgets and icon blocks before rendering HTML.
-  let articleContent = sanitizeArticleHtml(displayContent);
+  let articleContent = sanitizeArticleHtml(displayContent, entry.title);
+
+  // Remove cover image duplicate from article content
+  if (coverImageUrl) {
+    articleContent = removeFirstImageFromContent(articleContent, coverImageUrl);
+  }
   
   // Always strip YouTube embeds and detect embedded videos
   const { html: strippedContent, youtubeIds: embeddedYouTubeIds } = stripYouTubeEmbeds(articleContent);
@@ -317,6 +327,14 @@ export function ArticleContent({
         break-inside: avoid;
       }
 
+      /* Headings clear floats — natural section boundary so images don't
+         bleed into unrelated sections */
+      .informeer-article-typography h2,
+      .informeer-article-typography h3,
+      .informeer-article-typography h4 {
+        clear: both;
+      }
+
       .informeer-article-typography table {
         display: block;
         max-width: 100%;
@@ -332,29 +350,104 @@ export function ArticleContent({
         max-width: 100%;
       }
 
-      .informeer-article-typography img,
-      .informeer-article-typography figure {
-        break-inside: ${resolvedColumnCount === 2 ? 'auto' : 'avoid'};
-      }
-      ${resolvedColumnCount === 2 && isPaginated ? `
-      .informeer-article-typography img {
-        max-height: 45vh;
-        object-fit: contain;
-        object-position: left top;
-        width: auto;
-        max-width: 100%;
-      }
+      /* ── Figure / image layout ──────────────────────────────────────────
+         Default: full column width, stacked. This is correct for photo
+         essays (NatGeo, etc.) and any article where images outnumber prose.
+
+         Floating is opt-in: the sanitizer adds figure-float-left or
+         figure-float-right only when a figure is directly adjacent to a
+         paragraph with substantial text (≥ 90 chars). WordPress explicit
+         alignment classes (alignleft/alignright) always float.
+      ──────────────────────────────────────────────────────────────────── */
 
       .informeer-article-typography figure {
         break-inside: avoid;
+        clear: both;
+        max-width: 100%;
+        margin-top: 0.5em;
+        margin-bottom: 1.2em;
+        margin-left: 0;
+        margin-right: 0;
+      }
+
+      /* Inline float — adjacent to substantial paragraph text */
+      .informeer-article-typography figure.figure-float-left,
+      .informeer-article-typography figure.alignleft {
+        float: left;
+        clear: none;
+        max-width: 46%;
+        margin-right: 1.4em;
+        margin-left: 0;
+        margin-top: 0.25em;
+        margin-bottom: 1em;
+      }
+
+      .informeer-article-typography figure.figure-float-right,
+      .informeer-article-typography figure.alignright {
+        float: right;
+        clear: none;
+        max-width: 46%;
+        margin-left: 1.4em;
+        margin-right: 0;
+        margin-top: 0.25em;
+        margin-bottom: 1em;
+      }
+
+      .informeer-article-typography figure.aligncenter {
+        float: none;
+        clear: both;
+        max-width: 100%;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .informeer-article-typography figure img {
-        max-height: 40vh;
-        object-fit: contain;
-        object-position: left top;
-        width: auto;
-        max-width: 100%;
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 4px;
+      }
+
+      .informeer-article-typography figcaption {
+        font-size: 0.78em;
+        line-height: 1.4;
+        color: var(--color-text-tertiary);
+        margin-top: 0.4em;
+        font-style: italic;
+        text-align: left;
+      }
+
+      /* Photo caption promoted from an imageless figure (e.g. NYT JS-lazy) */
+      .informeer-article-typography .article-photo-caption {
+        font-size: 0.82em;
+        font-style: italic;
+        color: var(--color-text-tertiary);
+        padding-left: 0.75em;
+        border-left: 2px solid var(--color-border-subtle);
+        margin-top: 0.25em;
+        margin-bottom: 1em;
+        clear: both;
+      }
+
+      /* Article standfirst / dek */
+      .informeer-article-typography .article-standfirst {
+        font-size: 1.15em;
+        font-weight: 500;
+        line-height: 1.5;
+        color: var(--color-text-primary);
+        margin-bottom: 1.5em;
+        border-left: 3px solid var(--color-accent-fg);
+        padding-left: 0.85em;
+        clear: both;
+      }
+
+      ${resolvedColumnCount === 2 && isPaginated ? `
+      /* In 2-column paginated mode shrink floats so they fit within a column */
+      .informeer-article-typography figure.figure-float-left,
+      .informeer-article-typography figure.figure-float-right,
+      .informeer-article-typography figure.alignleft,
+      .informeer-article-typography figure.alignright {
+        max-width: 42%;
       }
       ` : ''}
 
@@ -485,7 +578,19 @@ export function ArticleContent({
             )}
           </div>
         )
-      : null;
+      : coverImageUrl
+        ? (
+            <div className="mb-8 -mx-2 sm:mx-0 overflow-hidden rounded-xl" style={avoidColumnBreakStyle}>
+              <img
+                src={coverImageUrl}
+                alt={entry.title}
+                loading="eager"
+                className="w-full object-cover max-h-[55vh]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            </div>
+          )
+        : null;
   const statusBadges = (
     <>
       {isLoadingReader && (

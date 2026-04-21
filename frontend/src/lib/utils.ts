@@ -219,21 +219,280 @@ function isLikelySocialShareElement(el: Element): boolean {
  * wrappers. Avoid generic terms like "newsletter", "promo", "ad" that
  * publishers use as class names on content sections too.
  */
-const PUBLISHER_CHROME_HINTS = /(?:save-this-story|save_story|cne-audio|paywall-barrier|paywall-message|subscriber-only-badge|piano-offer|pmc-paywall|laterpay|leaky-paywall|article-gate|regwall|hard-wall|soft-wall|outbrain|taboola)/i;
+const PUBLISHER_CHROME_HINTS = /(?:save-this-story|save_story|cne-audio|paywall-barrier|paywall-message|subscriber-only-badge|piano-offer|pmc-paywall|laterpay|leaky-paywall|article-gate|regwall|hard-wall|soft-wall|outbrain|taboola|consent-banner|cookie-consent|gdpr-consent|advert-slot|dfp-slot|gpt-ad|prebid-ad)/i;
 
 /**
  * Exact text content (whole-string match) for short chrome-only inline elements.
  * Use a narrow selector — avoid `div` because div.textContent includes all
  * descendant text and could accidentally match a content section wrapper.
  */
-const PUBLISHER_CHROME_TEXT = /^(?:save this story|saved|unsave|subscribe to read|subscribe now|already a subscriber|create a free account|this story is available|members only|sign in to read|get unlimited access|you['']ve reached your (?:free )?article limit|listen to this article|advertisement)\.?$/i;
+const PUBLISHER_CHROME_TEXT = /^(?:save this story|saved|unsave|subscribe to read|subscribe now|already a subscriber|create a free account|this story is available|members only|sign in to read|get unlimited access|you['\u2019]ve reached your (?:free )?article limit|listen to this article|advertisement|lees ook|read more|read also|related|meer lezen|gerelateerd|toon meer|load more|meer laden|show more|reacties bekijken|bekijk reacties|credit[.\u2026]{2,3})\u002e?$/i;
 
-export function sanitizeArticleHtml(html: string): string {
+/** Alt-text patterns that are not meaningful captions (machine-generated, generic) */
+const TRIVIAL_ALT_TEXT = /^(?:image|photo|picture|foto|afbeelding|image may contain|foto van|picture of|\.{1,3}|-|_|\s*)$/i;
+
+/** CSS selectors that identify publisher chrome to strip from the rendered article. */
+const STRUCTURAL_CHROME_SELECTORS = [
+  // Wired (Condé Nast) – data-testid attributes are stable across CSS-in-JS deploys
+  '[data-testid="SplitScreenContentHeaderWrapper"]',
+  '[data-testid="ContentHeaderWrapper"]',
+  '[data-testid="action-bar-wrapper"]',
+  '[data-testid*="PaywallInline"]',
+  '[data-testid*="PaywallBarrier"]',
+  '[data-testid*="Paywall"]',
+  // Presentation-only ad slots (JS fills them client-side → they're empty in stored HTML)
+  '[role="presentation"][aria-hidden="true"]',
+  // NRC.nl Bison web components
+  'dmt-icon',
+  'dmt-util-bar',
+  'dmt-share-widget',
+  'dmt-inline-article-widget',
+  // NYT – accessibility label span inside the lazy-image photo wrapper (shows as literal "Image")
+  '[data-testid="photoviewer-children-figure"] > span',
+];
+
+/**
+ * Flatten divs that serve only as structural containers (no direct text nodes,
+ * all children are block-level). This is needed because publishers like NatGeo
+ * wrap each paragraph group AND each figure in separate <div> elements.
+ * CSS floats are scoped to their block formatting context, so a figure floated
+ * inside its own <div> can never cause text in an adjacent <div> to wrap
+ * around it. By unwrapping these pure-container divs we make paragraphs and
+ * figures siblings in the same flow, which is the prerequisite for floats.
+ * Runs multiple passes until no more divs can be unwrapped.
+ */
+const BLOCK_LEVEL_TAGS = new Set([
+  'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+  'FIGURE', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'PRE', 'TABLE',
+  'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'HR', 'DL', 'DT', 'DD',
+  'DIV', 'SECTION', 'ASIDE', 'DETAILS', 'SUMMARY', 'HEADER', 'FOOTER',
+]);
+
+function flattenContainerDivs(doc: Document): void {
+  let changed = true;
+  let passes = 0;
+  while (changed && passes < 12) {
+    changed = false;
+    passes++;
+    for (const div of Array.from(doc.body.querySelectorAll('div, section'))) {
+      if (!div.isConnected) continue;
+      // Keep divs that have direct text nodes (they're content, not wrappers)
+      const hasDirectText = Array.from(div.childNodes).some(
+        n => n.nodeType === Node.TEXT_NODE && (n.textContent || '').trim().length > 0
+      );
+      if (hasDirectText) continue;
+      const children = Array.from(div.children);
+      if (children.length === 0) continue;
+      // Only unwrap if every immediate child is a block-level element
+      if (!children.every(c => BLOCK_LEVEL_TAGS.has(c.tagName))) continue;
+      const parent = div.parentElement;
+      if (!parent) continue;
+      // Move all children before the wrapper div, then remove the wrapper
+      while (div.firstChild) parent.insertBefore(div.firstChild, div);
+      div.remove();
+      changed = true;
+    }
+  }
+}
+
+/**
+ * Parse caption HTML attribute into plain text (handles WordPress-style
+ * data-image-caption which can itself contain HTML like "<p>Caption here</p>").
+ */
+function parseCaptionAttr(val: string): string {
+  if (!val) return '';
+  const tmp = new DOMParser().parseFromString(val, 'text/html');
+  return tmp.body.textContent?.trim() || '';
+}
+
+/**
+ * WordPress data-* attributes that are noisy metadata but not useful for display.
+ */
+const WP_NOISE_ATTRS = [
+  'data-attachment-id', 'data-permalink', 'data-orig-file',
+  'data-orig-size', 'data-comments-opened', 'data-image-meta',
+  'data-image-title', 'data-image-description', 'data-image-caption',
+  'data-medium-file', 'data-large-file',
+];
+
+/**
+ * Convert non-standard caption containers inside <figure> elements to
+ * proper <figcaption> elements. Many publishers (NatGeo, Getty, etc.) use
+ * divs with data-testid or class names containing "caption" instead of the
+ * semantic <figcaption> tag. Runs before wrapImagesInFigures so the latter
+ * sees proper figcaption elements when deciding whether to add one.
+ */
+function normalizeFigureCaptions(doc: Document): void {
+  for (const figure of Array.from(doc.querySelectorAll('figure'))) {
+    if (figure.querySelector('figcaption')) continue;
+    const captionEl = figure.querySelector(
+      '[data-testid*="caption"], [data-testid*="Caption"], .caption, [class*="caption"]'
+    );
+    if (!captionEl) continue;
+    const text = captionEl.textContent?.trim() || '';
+    if (text.length < 3) { captionEl.remove(); continue; }
+    const fc = doc.createElement('figcaption');
+    fc.textContent = text;
+    captionEl.replaceWith(fc);
+  }
+}
+
+/**
+ * Wrap bare <img> elements in <figure> tags with optional <figcaption>.
+ * Caption priority: WordPress data-image-caption → non-trivial alt text.
+ * Images already inside <figure> only get a missing figcaption added.
+ * Only processes images that are "paragraph-level" (inside <p> with no other
+ * significant text, or direct children of block containers).
+ */
+function wrapImagesInFigures(doc: Document): void {
+  for (const img of Array.from(doc.querySelectorAll('img'))) {
+    if (!img.isConnected) continue;
+
+    // Extract (and then remove) WordPress caption-related data-* attributes
+    const captionAttr = img.getAttribute('data-image-caption') || img.getAttribute('data-image-description') || '';
+    let captionText = parseCaptionAttr(captionAttr);
+    if (!captionText) {
+      const alt = img.getAttribute('alt')?.trim() || '';
+      if (alt && !TRIVIAL_ALT_TEXT.test(alt)) captionText = alt;
+    }
+
+    // Strip WordPress noise attributes
+    for (const attr of WP_NOISE_ATTRS) img.removeAttribute(attr);
+
+    const parent = img.parentElement;
+    const ancestorFigure = img.closest('figure');
+
+    if (ancestorFigure) {
+      // Add figcaption if the figure doesn't have one yet
+      if (captionText && !ancestorFigure.querySelector('figcaption')) {
+        const cap = doc.createElement('figcaption');
+        cap.textContent = captionText;
+        ancestorFigure.appendChild(cap);
+      }
+      continue;
+    }
+
+    // Decide what to wrap: prefer <a><img> (linked image) over bare <img>
+    const childToWrap = parent?.tagName === 'A' ? parent : img;
+    const grandParent = childToWrap.parentElement;
+    if (!grandParent) continue;
+
+    // Only wrap if the containing element is a block container with no other text
+    const isBlockImg =
+      grandParent.tagName === 'P' ||
+      grandParent.tagName === 'DIV' ||
+      grandParent.tagName === 'SECTION' ||
+      grandParent.tagName === 'BODY' ||
+      grandParent.tagName === 'ARTICLE';
+
+    if (!isBlockImg) continue;
+
+    // Check that the containing element has no other meaningful text
+    const textWithoutImg = Array.from(grandParent.childNodes)
+      .filter(n => n !== childToWrap && n !== img)
+      .map(n => n.textContent || '')
+      .join('')
+      .trim();
+    if (textWithoutImg) continue;
+
+    const figure = doc.createElement('figure');
+    grandParent.insertBefore(figure, childToWrap);
+    figure.appendChild(childToWrap);
+
+    if (captionText) {
+      const cap = doc.createElement('figcaption');
+      cap.textContent = captionText;
+      figure.appendChild(cap);
+    }
+
+    // Remove now-empty <p> wrapper if the figure took the only content
+    if (grandParent.tagName === 'P' && !grandParent.textContent?.trim()) {
+      grandParent.remove();
+    }
+  }
+}
+
+/**
+ * Classify figures as full-width or floating inline.
+ *
+ * A figure earns a float class only when it has substantial paragraph text
+ * as an immediate neighbour (prev or next sibling) AND is not adjacent to
+ * another figure. In all other cases (photo essays, galleries, sparse text)
+ * the figure stays full-width — stacking naturally from top to bottom.
+ *
+ * Classes added:
+ *   figure-float-left  → float: left, max-width ~46%
+ *   figure-float-right → float: right, max-width ~46%
+ *   (no class)         → full column width, clear: both
+ *
+ * WordPress explicit alignment classes (alignleft/alignright) are honoured
+ * unconditionally — they always float.
+ */
+function classifyFigures(doc: Document): void {
+  const FLOAT_PARA_MIN_LEN = 90; // chars of adjacent text needed to justify a float
+  const TEXT_TAGS = new Set(['P', 'H2', 'H3', 'H4']);
+
+  const figures = Array.from(doc.querySelectorAll('figure'));
+  let floatIndex = 0;
+
+  for (const fig of figures) {
+    if (!fig.isConnected) continue;
+
+    // WordPress explicit alignment takes priority — always float
+    if (fig.classList.contains('alignleft')) {
+      fig.classList.add('figure-float-left');
+      continue;
+    }
+    if (fig.classList.contains('alignright')) {
+      fig.classList.add('figure-float-right');
+      continue;
+    }
+
+    const prev = fig.previousElementSibling;
+    const next = fig.nextElementSibling;
+
+    // Neighbour is another figure → gallery / photo essay → full width
+    if (prev?.tagName === 'FIGURE' || next?.tagName === 'FIGURE') continue;
+
+    // Check for substantial adjacent text (prev or next sibling paragraph)
+    const prevLen = prev && TEXT_TAGS.has(prev.tagName)
+      ? (prev.textContent?.trim().length ?? 0) : 0;
+    const nextLen = next && TEXT_TAGS.has(next.tagName)
+      ? (next.textContent?.trim().length ?? 0) : 0;
+
+    if (prevLen >= FLOAT_PARA_MIN_LEN || nextLen >= FLOAT_PARA_MIN_LEN) {
+      floatIndex++;
+      fig.classList.add(floatIndex % 2 === 1 ? 'figure-float-left' : 'figure-float-right');
+    }
+    // else: no class → full width (the CSS default)
+  }
+}
+
+export function sanitizeArticleHtml(html: string, entryTitle?: string): string {
   if (!html) return html;
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
-  // ── Strip publisher chrome by class/id hints ──────────────────
+  // ── 0. Flatten structural container divs ──────────────────────────────────
+  // Must run BEFORE chrome-stripping so publisher wrapper divs don't isolate
+  // figures from their surrounding text, which would prevent CSS float wrapping.
+  flattenContainerDivs(doc);
+
+  // ── 0b. Normalize vendor caption containers to <figcaption> ───────────────
+  // NatGeo and others use [data-testid*="caption"] divs instead of <figcaption>.
+  // Must run before wrapImagesInFigures so it sees proper figcaption elements.
+  normalizeFigureCaptions(doc);
+
+  // ── 1. Strip structural publisher chrome by stable selectors ─────────────
+  for (const sel of STRUCTURAL_CHROME_SELECTORS) {
+    try {
+      for (const el of Array.from(doc.querySelectorAll(sel))) {
+        if ((el as Element).isConnected) (el as Element).remove();
+      }
+    } catch { /* invalid selector in some browsers – skip */ }
+  }
+
+  // ── 2. Strip publisher chrome by class/id hints ───────────────────────────
   // querySelectorAll returns a static snapshot, so removing earlier elements
   // doesn't affect iteration; guard with isConnected to skip double-removes.
   for (const el of Array.from(doc.body.querySelectorAll('[class],[id]'))) {
@@ -244,10 +503,49 @@ export function sanitizeArticleHtml(html: string): string {
     }
   }
 
-  // ── Strip short inline chrome elements by exact text ─────────
-  // Only check `p` and `span` — NOT `div`, because div.textContent is the
-  // concatenation of all descendants and can spuriously match on content divs.
-  for (const el of Array.from(doc.body.querySelectorAll('p, span'))) {
+  // ── 3. Strip duplicate leading h1 when entry title is known ──────────────
+  if (entryTitle) {
+    const titleNorm = entryTitle.toLowerCase().replace(/\s+/g, ' ').trim();
+    for (const h1 of Array.from(doc.body.querySelectorAll('h1'))) {
+      if (!h1.isConnected) continue;
+      const h1Norm = (h1.textContent || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      // Match if the heading text is a prefix of the entry title or vice-versa (handles
+      // cases where Readability truncates the title slightly differently)
+      if (
+        h1Norm === titleNorm ||
+        (h1Norm.length > 20 && titleNorm.startsWith(h1Norm)) ||
+        (titleNorm.length > 20 && h1Norm.startsWith(titleNorm.slice(0, Math.min(40, titleNorm.length))))
+      ) {
+        h1.remove();
+        break; // only remove the first matching heading
+      }
+    }
+  }
+
+  // ── 4. Strip NRC "Lees ook" / related-article link blocks ────────────────
+  // Pattern: <a> whose text starts with "lees ook", "read also", etc., or
+  // <a> whose only child is a small thumbnail image (related article teaser).
+  for (const a of Array.from(doc.body.querySelectorAll('a'))) {
+    if (!a.isConnected) continue;
+    const txt = (a.textContent || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (PUBLISHER_CHROME_TEXT.test(txt)) {
+      removeElementOrEmptyWrapper(a);
+      continue;
+    }
+    // Related-article links that contain only a small image (<= 200px wide)
+    const imgs = a.querySelectorAll('img');
+    if (imgs.length === 1 && !a.textContent?.trim()) {
+      const w = parseInt(imgs[0].getAttribute('width') || '999', 10);
+      if (w <= 200) {
+        removeElementOrEmptyWrapper(a);
+      }
+    }
+  }
+
+  // ── 5. Strip short inline chrome elements by exact text ──────────────────
+  // Only check `p`, `span`, `button` — NOT `div`, because div.textContent is
+  // the concatenation of all descendants and can spuriously match content divs.
+  for (const el of Array.from(doc.body.querySelectorAll('p, span, button'))) {
     if (!el.isConnected) continue;
     const text = (el.textContent || '').trim();
     if (
@@ -259,7 +557,9 @@ export function sanitizeArticleHtml(html: string): string {
     }
   }
 
+  // ── 6. Process images: remove bad ones, wrap good ones in figures ─────────
   for (const img of Array.from(doc.querySelectorAll('img'))) {
+    if (!img.isConnected) continue;
     const src = img.getAttribute('src') || '';
     if (!isGoodImageUrl(src, img.outerHTML, getElementHints(img)) || isSocialContainer(img)) {
       removeElementOrEmptyWrapper(img);
@@ -271,6 +571,10 @@ export function sanitizeArticleHtml(html: string): string {
     img.setAttribute('loading', 'eager');
   }
 
+  // Wrap paragraph-level images in <figure> elements with figcaptions
+  wrapImagesInFigures(doc);
+
+  // ── 7. Strip social share widgets ────────────────────────────────────────
   for (const el of Array.from(doc.body.querySelectorAll('*'))) {
     if (!el.isConnected) continue;
     if (isLikelySocialShareElement(el)) {
@@ -278,12 +582,42 @@ export function sanitizeArticleHtml(html: string): string {
     }
   }
 
+  // ── 8. Strip empty block elements ────────────────────────────────────────
   for (const el of Array.from(doc.body.querySelectorAll('p, div, section, aside'))) {
     if (!el.isConnected) continue;
-    if (!el.textContent?.trim() && el.querySelectorAll('img, iframe, video, audio, svg').length === 0) {
+    if (!el.textContent?.trim() && el.querySelectorAll('img, figure, iframe, video, audio, svg').length === 0) {
       el.remove();
     }
   }
+
+  // ── 9. Clean up <figure> shells with no visual media ─────────────────────
+  // NYT uses pure JS lazy-loading; server-rendered HTML has empty placeholder
+  // divs inside <figure> elements. After step 8 removes those empty divs, we
+  // may be left with a <figure> that has only a <figcaption>.
+  // — If there is caption text: promote the figcaption to a styled <p> so
+  //   the reader still gets the photo description.
+  // — If there is no caption text either: remove the empty shell entirely.
+  for (const figure of Array.from(doc.body.querySelectorAll('figure'))) {
+    if (!figure.isConnected) continue;
+    if (figure.querySelectorAll('img, video, iframe, canvas, svg').length > 0) continue;
+    const caption = figure.querySelector('figcaption');
+    const captionText = caption?.textContent?.trim() || '';
+    if (captionText) {
+      // Replace the empty figure with a plain italic caption paragraph
+      const p = doc.createElement('p');
+      p.className = 'article-photo-caption';
+      p.textContent = captionText;
+      figure.replaceWith(p);
+    } else {
+      figure.remove();
+    }
+  }
+
+  // ── 10. Classify figures as full-width or floating ────────────────────────
+  // Only float figures that are adjacent to substantial paragraph text.
+  // Photo-essay figures (surrounded by other figures or short captions) are
+  // left full-width so they stack naturally instead of creating a chaotic grid.
+  classifyFigures(doc);
 
   return doc.body.innerHTML;
 }

@@ -273,8 +273,9 @@ class ApiClient {
     });
   }
 
-  async fetchOriginalContent(id: number): Promise<Entry> {
-    return this.request<Entry>(`/entries/${id}/fetch-content`, {
+  async fetchOriginalContent(id: number, force = false): Promise<Entry> {
+    const qs = force ? '?force=true' : '';
+    return this.request<Entry>(`/entries/${id}/fetch-content${qs}`, {
       method: 'GET',
     });
   }
