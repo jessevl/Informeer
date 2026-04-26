@@ -20,9 +20,16 @@ import { PDFViewer } from './PDFViewer';
 import type { Entry, Feed } from '@/types/api';
 import { removeOfflineItem } from '@/lib/offline/blob-cache';
 import { useOfflineStore, useOfflineRegistry } from '@/stores/offline';
-import { useSettingsStore } from '@/stores/settings';
 import { useFeedsStore } from '@/stores/feeds';
+import { useSettingsStore } from '@/stores/settings';
 import { FilterBar } from '@/components/ui/FilterBar';
+import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import {
+  PaginatedOverviewSurface,
+  useMeasuredContainerSize,
+  usePaginatedItems,
+  useResponsiveGridPageSize,
+} from '@/components/overview/PaginatedOverview';
 
 /** Breakpoint → column count, must stay in sync with the grid-cols-* classes below */
 function useGridColumns() {
@@ -42,6 +49,27 @@ function getColCount(): number {
   if (w >= 768) return 4;  // md
   if (w >= 640) return 3;  // sm
   return 2;                // default
+}
+
+function usePaginatedGridColumns() {
+  const [cols, setCols] = useState(() => getPaginatedColCount());
+  useEffect(() => {
+    const onResize = () => setCols(getPaginatedColCount());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return cols;
+}
+
+function getPaginatedColCount(): number {
+  const w = window.innerWidth;
+  if (w >= 1700) return 8;
+  if (w >= 1450) return 7;
+  if (w >= 1200) return 6;
+  if (w >= 900) return 5;
+  if (w >= 640) return 4;
+  if (w >= 480) return 3;
+  return 2;
 }
 
 interface MagazinesViewProps {
@@ -146,6 +174,7 @@ export function MagazinesView({
   onRefresh,
 }: MagazinesViewProps) {
   const gridColumns = useGridColumns();
+  const paginatedGridColumns = usePaginatedGridColumns();
   const {
     subscriptions,
     magazineFeedIds,
@@ -170,9 +199,12 @@ export function MagazinesView({
   // Track the feed whose row is currently mounted (stays set during close animation)
   const [mountedFeedId, setMountedFeedId] = useState<number | null>(null);
   const [showOfflineOnly, setShowOfflineOnly] = useState(false);
-  const offlineMode = useSettingsStore(s => s.offlineMode);
-  const effectiveOfflineOnly = offlineMode || showOfflineOnly;
+  const einkMode = useSettingsStore((s) => s.einkMode);
+  const { effectiveOffline } = useEffectiveOfflineState();
+  const effectiveOfflineOnly = effectiveOffline || showOfflineOnly;
   const gridRef = useRef<HTMLDivElement>(null);
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const overviewSize = useMeasuredContainerSize(overviewRef);
 
   // Fetch subscriptions on mount
   useEffect(() => {
@@ -290,15 +322,46 @@ export function MagazinesView({
 
   // Compute saved-offline counts per feed
   const offlineRegistry = useOfflineRegistry();
-  const savedCountByFeed = useMemo(() => {
-    const magItems = offlineRegistry.filter(i => i.type === 'magazine');
-    const counts: Record<number, number> = {};
-    for (const group of magazineGroups) {
-      const savedIds = new Set(magItems.map(i => i.id));
-      counts[group.feedId] = group.issues.filter(i => savedIds.has(i.id)).length;
+  const offlineFallbackGroups = useMemo((): MagazineGroup[] => {
+    const grouped = new Map<string, MagazineIssue[]>();
+
+    for (const item of offlineRegistry) {
+      if (item.type !== 'magazine') continue;
+
+      const feedTitle = item.feedTitle || 'Saved magazines';
+      const issue: MagazineIssue = {
+        id: item.id,
+        title: item.title,
+        sourceUrl: '',
+        coverUrl: item.coverUrl || '',
+        pdfUrl: '',
+        pdfLayout: 'standard',
+        pubDate: new Date(item.savedAt).toISOString(),
+        description: '',
+        seriesName: feedTitle,
+        categories: [],
+      };
+
+      const existing = grouped.get(feedTitle);
+      if (existing) {
+        existing.push(issue);
+      } else {
+        grouped.set(feedTitle, [issue]);
+      }
     }
-    return counts;
-  }, [magazineGroups, offlineRegistry]);
+
+    return Array.from(grouped.entries())
+      .sort((left, right) => left[0].localeCompare(right[0], undefined, { sensitivity: 'base' }))
+      .map(([feedTitle, issues], index) => {
+        issues.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+        return {
+          feedId: -(index + 1),
+          feedTitle,
+          issues,
+          latestIssue: issues[0],
+        };
+      });
+  }, [offlineRegistry]);
 
   // Apply offline filter to groups
   const filteredGroups = useMemo(() => {
@@ -313,11 +376,59 @@ export function MagazinesView({
       .map(g => ({ ...g, latestIssue: g.issues[0] }));
   }, [magazineGroups, effectiveOfflineOnly, offlineRegistry]);
 
+  const displayedGroups = useMemo(() => {
+    if (filteredGroups.length > 0 || !effectiveOfflineOnly) {
+      return filteredGroups;
+    }
+
+    return offlineFallbackGroups;
+  }, [filteredGroups, effectiveOfflineOnly, offlineFallbackGroups]);
+
+  const visibleLoadingFeeds = useMemo(() => {
+    if (displayedGroups.length > 0 && effectiveOfflineOnly) {
+      return [];
+    }
+
+    return loadingFeeds;
+  }, [displayedGroups.length, effectiveOfflineOnly, loadingFeeds]);
+
+  const savedCountByFeed = useMemo(() => {
+    const savedIds = new Set(offlineRegistry.filter(i => i.type === 'magazine').map(i => i.id));
+    const counts: Record<number, number> = {};
+    for (const group of displayedGroups) {
+      counts[group.feedId] = group.issues.filter((issue) => savedIds.has(issue.id)).length;
+    }
+    return counts;
+  }, [displayedGroups, offlineRegistry]);
+  const groupsPerPage = useResponsiveGridPageSize({
+    columns: paginatedGridColumns,
+    aspectRatio: 3 / 4,
+    metaHeight: 84,
+    containerSize: overviewSize,
+    gap: 24,
+    chromeOffset: effectiveOffline ? 250 : 290,
+  });
+  const pagedGroups = usePaginatedItems(displayedGroups, groupsPerPage);
+  const visibleGroups = einkMode ? pagedGroups.pageItems : displayedGroups;
+  const visibleColumns = einkMode ? paginatedGridColumns : gridColumns;
+
   // Resolve the currently selected group from the feedId
   const selectedGroup = useMemo(() => {
     if (!selectedFeedId) return null;
-    return filteredGroups.find(g => g.feedId === selectedFeedId) || null;
-  }, [selectedFeedId, filteredGroups]);
+    return displayedGroups.find(g => g.feedId === selectedFeedId) || null;
+  }, [selectedFeedId, displayedGroups]);
+
+  useEffect(() => {
+    const visibleFeedIds = new Set(visibleGroups.map((group) => group.feedId));
+
+    if (selectedFeedId !== null && !visibleFeedIds.has(selectedFeedId)) {
+      setSelectedFeedId(null);
+    }
+
+    if (mountedFeedId !== null && !visibleFeedIds.has(mountedFeedId)) {
+      setMountedFeedId(null);
+    }
+  }, [visibleGroups, selectedFeedId, mountedFeedId]);
 
   // Toggle a group open/closed
   const handleToggleGroup = useCallback((group: MagazineGroup) => {
@@ -350,14 +461,14 @@ export function MagazinesView({
   // Handle removing all saved issues for a feed
   const handleRemoveAllSaved = useCallback(async (feedId: number) => {
     const registry = useOfflineStore.getState().registry;
-    const group = magazineGroups.find(g => g.feedId === feedId);
+    const group = displayedGroups.find(g => g.feedId === feedId);
     if (!group) return;
     const issueIds = new Set(group.issues.map(i => i.id));
     const toRemove = registry.filter(i => i.type === 'magazine' && issueIds.has(i.id));
     for (const item of toRemove) {
       await removeOfflineItem(item.cacheKey);
     }
-  }, [magazineGroups]);
+  }, [displayedGroups]);
 
   // Handle opening an issue
   const handleOpenIssue = useCallback((issue: MagazineIssue) => {
@@ -408,7 +519,7 @@ export function MagazinesView({
     <>
       <div className="flex flex-col h-full relative">
         {/* Stack grid view — always visible */}
-        <div className="flex-1 overflow-y-auto content-below-header content-above-navbar">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header content-above-navbar">
           {subscriptions.length === 0 ? (
             // Empty state
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-tertiary)] p-8">
@@ -428,12 +539,12 @@ export function MagazinesView({
                 <p>Covers and PDFs are detected automatically from entry content</p>
               </div>
             </div>
-          ) : filteredGroups.length === 0 && effectiveOfflineOnly ? (
+          ) : displayedGroups.length === 0 && effectiveOfflineOnly ? (
             // No offline issues
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-tertiary)] p-8">
               <CloudOff size={48} className="mb-4 opacity-30" />
               <p className="text-sm">No magazines saved for offline use</p>
-              {!offlineMode && (
+              {!effectiveOffline && (
               <button
                 onClick={() => setShowOfflineOnly(false)}
                 className="mt-3 text-xs text-[var(--color-accent-fg)] hover:underline"
@@ -442,7 +553,7 @@ export function MagazinesView({
               </button>
               )}
             </div>
-          ) : filteredGroups.length === 0 && loadingFeeds.length === 0 ? (
+          ) : displayedGroups.length === 0 && visibleLoadingFeeds.length === 0 ? (
             // Loading state
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-tertiary)] p-8">
               <Library size={48} className="mb-4 opacity-30" />
@@ -452,7 +563,7 @@ export function MagazinesView({
             // Magazine stacks grid with inline issue rows
             <>
               {/* Filter bar */}
-              {!offlineMode && (
+              {!effectiveOffline && (
                 <FilterBar
                   groups={[{
                     options: [
@@ -464,48 +575,105 @@ export function MagazinesView({
                   }]}
                 />
               )}
-              <div
-                ref={gridRef}
-                className={cn(
-                  'grid gap-x-8 gap-y-6 p-6',
-                  'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
-                )}
-              >
-                {/* Placeholder stacks for feeds still loading entries */}
-                {loadingFeeds.map(feed => (
-                  <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
-                    <div className={cn(
-                      'relative aspect-[3/4] w-full rounded-lg',
-                      'bg-[var(--color-surface-secondary)]',
-                      'flex items-center justify-center',
-                      'animate-pulse',
-                    )}>
-                      <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
+              <div ref={overviewRef} className="flex-1 min-h-0">
+                {einkMode ? (
+                  <PaginatedOverviewSurface
+                    currentPage={pagedGroups.currentPage}
+                    pageCount={pagedGroups.pageCount}
+                    totalItems={displayedGroups.length}
+                    rangeStart={pagedGroups.rangeStart}
+                    rangeEnd={pagedGroups.rangeEnd}
+                    onPrevPage={pagedGroups.goToPrevPage}
+                    onNextPage={pagedGroups.goToNextPage}
+                    enabled={!isPdfViewerOpen}
+                  >
+                    <div
+                      ref={gridRef}
+                      className="grid gap-x-8 gap-y-6 p-6"
+                      style={{ gridTemplateColumns: `repeat(${visibleColumns}, minmax(0, 1fr))` }}
+                    >
+                      {/* Placeholder stacks for feeds still loading entries */}
+                      {pagedGroups.currentPage === 0 && visibleLoadingFeeds.map(feed => (
+                        <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
+                          <div className={cn(
+                            'relative aspect-[3/4] w-full rounded-lg',
+                            'bg-[var(--color-surface-secondary)]',
+                            'flex items-center justify-center',
+                            'animate-pulse',
+                          )}>
+                            <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
+                          </div>
+                          <div className="flex flex-col gap-0.5 px-0.5">
+                            <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
+                              {feed.title}
+                            </h3>
+                            <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
+                          </div>
+                        </div>
+                      ))}
+                      {renderStacksWithIssueRow(
+                        visibleGroups,
+                        visibleColumns,
+                        selectedFeedId,
+                        mountedFeedId,
+                        handleToggleGroup,
+                        handleOpenIssue,
+                        handleRowClosed,
+                        setSelectedFeedId,
+                        progressMap,
+                        handleRetryIssue,
+                        savedCountByFeed,
+                        handleUnsubscribe,
+                        handleRemoveAllSaved,
+                      )}
                     </div>
-                    <div className="flex flex-col gap-0.5 px-0.5">
-                      <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
-                        {feed.title}
-                      </h3>
-                      <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
+                  </PaginatedOverviewSurface>
+                ) : (
+                  <div className="h-full min-h-0 overflow-y-auto">
+                    <div
+                      ref={gridRef}
+                      className={cn(
+                        'grid gap-x-8 gap-y-6 p-6',
+                        'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
+                      )}
+                    >
+                      {visibleLoadingFeeds.map(feed => (
+                        <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
+                          <div className={cn(
+                            'relative aspect-[3/4] w-full rounded-lg',
+                            'bg-[var(--color-surface-secondary)]',
+                            'flex items-center justify-center',
+                            'animate-pulse',
+                          )}>
+                            <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
+                          </div>
+                          <div className="flex flex-col gap-0.5 px-0.5">
+                            <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
+                              {feed.title}
+                            </h3>
+                            <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
+                          </div>
+                        </div>
+                      ))}
+                      {renderStacksWithIssueRow(
+                        visibleGroups,
+                        visibleColumns,
+                        selectedFeedId,
+                        mountedFeedId,
+                        handleToggleGroup,
+                        handleOpenIssue,
+                        handleRowClosed,
+                        setSelectedFeedId,
+                        progressMap,
+                        handleRetryIssue,
+                        savedCountByFeed,
+                        handleUnsubscribe,
+                        handleRemoveAllSaved,
+                      )}
                     </div>
                   </div>
-                ))}
-                {renderStacksWithIssueRow(
-                  filteredGroups,
-                gridColumns,
-                selectedFeedId,
-                mountedFeedId,
-                handleToggleGroup,
-                handleOpenIssue,
-                handleRowClosed,
-                setSelectedFeedId,
-                progressMap,
-                handleRetryIssue,
-                savedCountByFeed,
-                handleUnsubscribe,
-                handleRemoveAllSaved,
-              )}
-            </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -591,7 +759,7 @@ function renderStacksWithIssueRow(
         progressMap={progressMap}
         isSelected={selectedFeedId === group.feedId}
         savedCount={savedCountByFeed?.[group.feedId] || 0}
-        onUnsubscribe={onUnsubscribe}
+        onUnsubscribe={group.feedId > 0 ? onUnsubscribe : undefined}
         onRemoveAllSaved={onRemoveAllSaved}
       />
     );

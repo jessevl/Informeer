@@ -37,6 +37,14 @@ import { useIsOffline, useOfflineStore, useOfflineRegistry } from '@/stores/offl
 import { api } from '@/api/client';
 import { useFeedsStore } from '@/stores/feeds';
 import { FilterBar } from '@/components/ui/FilterBar';
+import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import {
+  PaginatedOverviewSurface,
+  useMeasuredContainerSize,
+  usePaginatedItems,
+  useResponsiveGridPageSize,
+  useResponsiveListPageSize,
+} from '@/components/overview/PaginatedOverview';
 
 type PodcastViewMode = 'shows' | 'saved';
 
@@ -72,6 +80,26 @@ function getColCount(): number {
   if (w >= 768) return 4;  // md
   if (w >= 640) return 4;  // sm
   return 3;                // default
+}
+
+function usePaginatedGridColumns() {
+  const [cols, setCols] = useState(() => getPaginatedColCount());
+  useEffect(() => {
+    const onResize = () => setCols(getPaginatedColCount());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return cols;
+}
+
+function getPaginatedColCount(): number {
+  const w = window.innerWidth;
+  if (w >= 1700) return 8;
+  if (w >= 1450) return 7;
+  if (w >= 1200) return 6;
+  if (w >= 900) return 5;
+  if (w >= 640) return 4;
+  return 3;
 }
 
 // ==================== Episode Card (for Recent view) ====================
@@ -206,14 +234,20 @@ export function PodcastsView({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const audioCategoryId = useSettingsStore((s) => s.audioCategoryId);
-  const offlineMode = useSettingsStore((s) => s.offlineMode);
+  const einkMode = useSettingsStore((s) => s.einkMode);
+  const { effectiveOffline } = useEffectiveOfflineState();
   const gridColumns = useGridColumns();
+  const paginatedGridColumns = usePaginatedGridColumns();
+  const showsOverviewRef = useRef<HTMLDivElement>(null);
+  const savedOverviewRef = useRef<HTMLDivElement>(null);
+  const showsOverviewSize = useMeasuredContainerSize(showsOverviewRef);
+  const savedOverviewSize = useMeasuredContainerSize(savedOverviewRef);
 
   // View mode toggle: shows (stacks) vs saved (offline)
   const [podcastViewMode, setPodcastViewMode] = useState<PodcastViewMode>('shows');
 
   // Force 'saved' mode when global offline mode is on
-  const effectiveViewMode = offlineMode ? 'saved' : podcastViewMode;
+  const effectiveViewMode = effectiveOffline ? 'saved' : podcastViewMode;
 
   // Stacks selection state
   const [selectedFeedId, setSelectedFeedId] = useState<number | null>(null);
@@ -285,6 +319,20 @@ export function PodcastsView({
       return enc && offlinePodcastIds.has(String(enc.id));
     });
   }, [allRecentEpisodes, offlinePodcastIds, effectiveViewMode]);
+  const showsPerPage = useResponsiveGridPageSize({
+    columns: paginatedGridColumns,
+    aspectRatio: 1,
+    metaHeight: 72,
+    containerSize: showsOverviewSize,
+    gap: 16,
+    chromeOffset: recentRowEpisodes.length > 0 ? 430 : 270,
+  });
+  const savedEpisodesPerPage = useResponsiveListPageSize({
+    itemHeight: 104,
+    containerSize: savedOverviewSize,
+    gap: 4,
+    chromeOffset: recentRowEpisodes.length > 0 ? 430 : 270,
+  });
 
   // Build podcast groups (for shows/stacks view)
   const podcastGroups = useMemo((): PodcastGroup[] => {
@@ -341,6 +389,23 @@ export function PodcastsView({
     }
     return counts;
   }, [podcastGroups, offlineRegistry]);
+  const pagedPodcastGroups = usePaginatedItems(podcastGroups, showsPerPage);
+  const pagedSavedEpisodes = usePaginatedItems(savedEpisodes, savedEpisodesPerPage);
+  const visiblePodcastGroups = einkMode ? pagedPodcastGroups.pageItems : podcastGroups;
+  const visibleSavedEpisodes = einkMode ? pagedSavedEpisodes.pageItems : savedEpisodes;
+  const visibleShowColumns = einkMode ? paginatedGridColumns : gridColumns;
+
+  useEffect(() => {
+    const visibleFeedIds = new Set(visiblePodcastGroups.map((group) => group.feedId));
+
+    if (selectedFeedId !== null && !visibleFeedIds.has(selectedFeedId)) {
+      setSelectedFeedId(null);
+    }
+
+    if (mountedFeedId !== null && !visibleFeedIds.has(mountedFeedId)) {
+      setMountedFeedId(null);
+    }
+  }, [visiblePodcastGroups, selectedFeedId, mountedFeedId]);
 
   // Toggle a group open/closed
   const handleToggleGroup = useCallback((group: PodcastGroup) => {
@@ -419,14 +484,14 @@ export function PodcastsView({
       {/* Main Content Area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden content-below-header content-above-navbar"
+        className="flex flex-1 min-h-0 flex-col overflow-y-auto overflow-x-hidden content-below-header content-above-navbar"
         style={{
           transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : undefined,
           transition: isPulling ? 'none' : 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         {/* View mode toggle bar */}
-        {!offlineMode && (
+        {!effectiveOffline && (
           <FilterBar
             groups={[{
               options: [
@@ -537,32 +602,67 @@ export function PodcastsView({
               <p className="text-sm">No podcast shows loaded yet</p>
             </div>
           ) : (
-            <div
-              className={cn(
-                'grid gap-x-4 gap-y-4 p-4',
-                'grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
-              )}
-            >
-              {renderStacksWithEpisodeRow(
-                podcastGroups,
-                gridColumns,
-                selectedFeedId,
-                mountedFeedId,
-                handleToggleGroup,
-                handleRowClosed,
-                setSelectedFeedId,
-                onSelectEntry,
-                entries,
-                playSeriesFromEntry,
-                savedCountByFeed,
-                handleUnsubscribe,
-                handleRemoveAllSaved,
+            <div ref={showsOverviewRef} className="flex-1 min-h-0">
+              {einkMode ? (
+                <PaginatedOverviewSurface
+                  currentPage={pagedPodcastGroups.currentPage}
+                  pageCount={pagedPodcastGroups.pageCount}
+                  totalItems={podcastGroups.length}
+                  rangeStart={pagedPodcastGroups.rangeStart}
+                  rangeEnd={pagedPodcastGroups.rangeEnd}
+                  onPrevPage={pagedPodcastGroups.goToPrevPage}
+                  onNextPage={pagedPodcastGroups.goToNextPage}
+                >
+                  <div
+                    className="grid gap-x-4 gap-y-4 p-4"
+                    style={{ gridTemplateColumns: `repeat(${visibleShowColumns}, minmax(0, 1fr))` }}
+                  >
+                    {renderStacksWithEpisodeRow(
+                      visiblePodcastGroups,
+                      visibleShowColumns,
+                      selectedFeedId,
+                      mountedFeedId,
+                      handleToggleGroup,
+                      handleRowClosed,
+                      setSelectedFeedId,
+                      onSelectEntry,
+                      entries,
+                      playSeriesFromEntry,
+                      savedCountByFeed,
+                      handleUnsubscribe,
+                      handleRemoveAllSaved,
+                    )}
+                  </div>
+                </PaginatedOverviewSurface>
+              ) : (
+                <div
+                  className={cn(
+                    'grid gap-x-4 gap-y-4 p-4',
+                    'grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
+                  )}
+                >
+                  {renderStacksWithEpisodeRow(
+                    visiblePodcastGroups,
+                    visibleShowColumns,
+                    selectedFeedId,
+                    mountedFeedId,
+                    handleToggleGroup,
+                    handleRowClosed,
+                    setSelectedFeedId,
+                    onSelectEntry,
+                    entries,
+                    playSeriesFromEntry,
+                    savedCountByFeed,
+                    handleUnsubscribe,
+                    handleRemoveAllSaved,
+                  )}
+                </div>
               )}
             </div>
           )
         ) : (
           /* ==================== Saved (Offline) View ==================== */
-          <div className="p-2">
+          <div className="flex flex-1 min-h-0 flex-col p-2">
             {savedEpisodes.length === 0 ? (
               <div className="text-center py-12 text-[var(--color-text-tertiary)]">
                 <CloudOff size={48} className="mx-auto mb-4 opacity-50" />
@@ -572,15 +672,40 @@ export function PodcastsView({
                 </p>
               </div>
             ) : (
-              <div className="space-y-1">
-                {savedEpisodes.map(entry => (
-                  <EpisodeCard
-                    key={entry.id}
-                    entry={entry}
-                    onSelect={() => onSelectEntry(entry)}
-                    isListened={isEntryListened(entry.id)}
-                  />
-                ))}
+              <div ref={savedOverviewRef} className="flex-1 min-h-0">
+                {einkMode ? (
+                  <PaginatedOverviewSurface
+                    currentPage={pagedSavedEpisodes.currentPage}
+                    pageCount={pagedSavedEpisodes.pageCount}
+                    totalItems={savedEpisodes.length}
+                    rangeStart={pagedSavedEpisodes.rangeStart}
+                    rangeEnd={pagedSavedEpisodes.rangeEnd}
+                    onPrevPage={pagedSavedEpisodes.goToPrevPage}
+                    onNextPage={pagedSavedEpisodes.goToNextPage}
+                  >
+                    <div className="space-y-1 pb-10">
+                      {visibleSavedEpisodes.map(entry => (
+                        <EpisodeCard
+                          key={entry.id}
+                          entry={entry}
+                          onSelect={() => onSelectEntry(entry)}
+                          isListened={isEntryListened(entry.id)}
+                        />
+                      ))}
+                    </div>
+                  </PaginatedOverviewSurface>
+                ) : (
+                  <div className="space-y-1 pb-10">
+                    {visibleSavedEpisodes.map(entry => (
+                      <EpisodeCard
+                        key={entry.id}
+                        entry={entry}
+                        onSelect={() => onSelectEntry(entry)}
+                        isListened={isEntryListened(entry.id)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -19,7 +19,7 @@ export interface ReaderKeyboardCallbacks {
   onZoomReset?: () => void;
 }
 
-export function useReaderKeyboard(callbacks: ReaderKeyboardCallbacks) {
+export function useReaderKeyboard(callbacks: ReaderKeyboardCallbacks, enabled = true) {
   // Keep callbacks in a ref so the stable listener always calls the latest version.
   // Using a ref (instead of re-registering the listener on every callbacks change)
   // ensures there is never a brief window where no keyboard listener is attached,
@@ -28,10 +28,14 @@ export function useReaderKeyboard(callbacks: ReaderKeyboardCallbacks) {
   callbacksRef.current = callbacks;
 
   useEffect(() => {
+    if (!enabled) return;
+
     function handleKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      const isTypingTarget = Boolean(
-        target?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'),
+      const target = e.target;
+      // Guard with instanceof Element: forwarded events from the EPUB iframe arrive
+      // with target === window (not an Element), and calling window.closest() throws.
+      const isTypingTarget = target instanceof Element && Boolean(
+        target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'),
       );
       if (isTypingTarget) return;
 
@@ -84,5 +88,5 @@ export function useReaderKeyboard(callbacks: ReaderKeyboardCallbacks) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);  // stable: listener never re-registers, always calls latest callbacks via ref
+  }, [enabled]);  // stable: listener never re-registers unless enabled toggles; callbacks stay fresh via ref
 }

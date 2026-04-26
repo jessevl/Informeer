@@ -13,6 +13,23 @@ interface NativeShellPlugin {
   getServerUrl(): Promise<{ url: string | null }>;
   setServerUrl(options: { url: string }): Promise<void>;
   clearServerUrl(): Promise<void>;
+  getNetworkStatus(): Promise<NativeShellNetworkStatus>;
+  setOfflineMode(options: { enabled: boolean }): Promise<NativeShellNetworkStatus & NativeShellOfflineModeResult>;
+}
+
+export interface NativeShellNetworkStatus {
+  connected: boolean;
+  wifiConnected: boolean;
+  wifiEnabled: boolean;
+  canToggleProgrammatically: boolean;
+}
+
+export interface NativeShellOfflineModeResult {
+  requestedOffline: boolean;
+  applied: boolean;
+  changed: boolean;
+  requiresUserAction: boolean;
+  openedSystemPanel?: boolean;
 }
 
 class NativeShellWebPlugin extends WebPlugin implements NativeShellPlugin {
@@ -23,6 +40,27 @@ class NativeShellWebPlugin extends WebPlugin implements NativeShellPlugin {
   async setServerUrl(): Promise<void> {}
 
   async clearServerUrl(): Promise<void> {}
+
+  async getNetworkStatus(): Promise<NativeShellNetworkStatus> {
+    const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    return {
+      connected: online,
+      wifiConnected: online,
+      wifiEnabled: online,
+      canToggleProgrammatically: false,
+    };
+  }
+
+  async setOfflineMode(options: { enabled: boolean }): Promise<NativeShellNetworkStatus & NativeShellOfflineModeResult> {
+    const status = await this.getNetworkStatus();
+    return {
+      ...status,
+      requestedOffline: options.enabled,
+      applied: false,
+      changed: false,
+      requiresUserAction: false,
+    };
+  }
 }
 
 const NativeShell = registerPlugin<NativeShellPlugin>('NativeShell', {
@@ -41,4 +79,14 @@ export function isAndroidNativeShell(): boolean {
 export async function clearServerUrl(): Promise<void> {
   if (!isAndroidNativeShell()) return;
   await NativeShell.clearServerUrl();
+}
+
+export async function getNativeShellNetworkStatus(): Promise<NativeShellNetworkStatus | null> {
+  if (!isAndroidNativeShell()) return null;
+  return NativeShell.getNetworkStatus();
+}
+
+export async function setNativeShellOfflineMode(enabled: boolean): Promise<(NativeShellNetworkStatus & NativeShellOfflineModeResult) | null> {
+  if (!isAndroidNativeShell()) return null;
+  return NativeShell.setOfflineMode({ enabled });
 }

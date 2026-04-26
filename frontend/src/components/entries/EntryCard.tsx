@@ -112,7 +112,7 @@ export function EntryCard({
             ? 'bg-[var(--color-accent-muted)]'
             : 'hover:bg-[var(--color-surface-hover)]',
         // Read state
-        !isUnread && !isSelected && !isCurrentlyPlaying && 'opacity-70'
+        !isUnread && !isSelected && !isCurrentlyPlaying && 'bg-[color-mix(in_srgb,var(--color-surface-secondary)_72%,transparent)] opacity-60'
       )}
     >
       <div className="flex items-start gap-3">
@@ -136,7 +136,7 @@ export function EntryCard({
             'text-sm leading-snug line-clamp-2',
             isUnread 
               ? 'font-medium text-[var(--color-text-primary)]' 
-              : 'text-[var(--color-text-secondary)]',
+              : 'font-normal text-[var(--color-text-tertiary)]',
             isSelected && 'text-[var(--color-text-primary)]'
           )}>
             {entry.title}
@@ -151,6 +151,15 @@ export function EntryCard({
               <>
                 <span className="text-[var(--color-border-default)]">·</span>
                 <span className="whitespace-nowrap">{formatReadingTime(entry.reading_time)}</span>
+              </>
+            )}
+            {!isUnread && (
+              <>
+                <span className="text-[var(--color-border-default)]">·</span>
+                <span className="inline-flex items-center gap-1 whitespace-nowrap text-[color-mix(in_srgb,var(--color-text-tertiary)_86%,var(--color-surface-base))]">
+                  <Check size={10} />
+                  Read
+                </span>
               </>
             )}
             {/* Media type indicator with progress ring */}

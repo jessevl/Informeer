@@ -10,6 +10,7 @@ export interface OfflineItem {
   id: string;
   title: string;
   cacheKey: string;
+  coverCacheKey?: string;
   retention?: 'manual' | 'recent';
   savedAt: number;
   sizeBytes: number;
@@ -24,6 +25,7 @@ interface SaveBlobOptions {
   retention?: OfflineRetention;
   contentType?: string;
   maxRecentItems?: number;
+  coverAuthHeader?: string;
 }
 
 const CACHE_NAME = 'informeer-offline';
@@ -110,8 +112,45 @@ async function pruneRecentOfflineItemsInternal(
   const itemsToRemove = recentItems.slice(limit);
   if (itemsToRemove.length === 0) return;
 
-  await Promise.all(itemsToRemove.map((item) => cache.delete(item.cacheKey)));
+  await Promise.all(itemsToRemove.flatMap((item) => {
+    const keys = [item.cacheKey];
+    if (item.coverCacheKey) keys.push(item.coverCacheKey);
+    return keys.map((key) => cache.delete(key));
+  }));
   saveRegistry(registry.filter((item) => !itemsToRemove.some((candidate) => candidate.cacheKey === item.cacheKey)));
+}
+
+async function cacheAuxiliaryBlob(
+  url: string | undefined,
+  cacheKey: string,
+  authHeader?: string,
+): Promise<string | undefined> {
+  if (!url) {
+    return undefined;
+  }
+
+  try {
+    const cache = await openOfflineCache();
+    const response = await fetch(url, authHeader ? { headers: { Authorization: authHeader } } : undefined);
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const blob = await response.blob();
+    await cache.put(
+      cacheKey,
+      new Response(
+        blob,
+        response.headers.get('Content-Type')
+          ? { headers: { 'Content-Type': response.headers.get('Content-Type')! } }
+          : undefined,
+      ),
+    );
+
+    return cacheKey;
+  } catch {
+    return undefined;
+  }
 }
 
 async function upsertOfflineBlob(
@@ -129,11 +168,17 @@ async function upsertOfflineBlob(
   const registry = getOfflineRegistry();
   const existing = registry.find((entry) => entry.cacheKey === item.cacheKey);
   const nextRetention = getRetention(existing) === 'manual' ? 'manual' : retention;
+  const nextCoverCacheKey = item.coverCacheKey ?? existing?.coverCacheKey;
+
+  if (existing?.coverCacheKey && existing.coverCacheKey !== nextCoverCacheKey) {
+    await cache.delete(existing.coverCacheKey);
+  }
 
   saveRegistry([
     ...registry.filter((entry) => entry.cacheKey !== item.cacheKey),
     {
       ...item,
+      coverCacheKey: nextCoverCacheKey,
       retention: nextRetention,
       savedAt: Date.now(),
       sizeBytes: blob.size,
@@ -159,7 +204,7 @@ export async function saveBookOffline(
   const resp = await fetch(url, { headers: { Authorization: authHeader } });
   if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
 
-  await saveBookOfflineData(bookId, title, await resp.blob(), coverUrl, author);
+  await saveBookOfflineData(bookId, title, await resp.blob(), coverUrl, author, { coverAuthHeader: authHeader });
 }
 
 export async function saveBookOfflineData(
@@ -170,12 +215,19 @@ export async function saveBookOfflineData(
   author?: string,
   options?: SaveBlobOptions,
 ): Promise<void> {
+  const coverCacheKey = await cacheAuxiliaryBlob(
+    coverUrl,
+    `/offline/books/${bookId}/cover`,
+    options?.coverAuthHeader,
+  );
+
   await upsertOfflineBlob(
     {
       type: 'book',
       id: String(bookId),
       title,
       cacheKey: `/offline/books/${bookId}`,
+      coverCacheKey,
       coverUrl,
       author,
     },
@@ -207,12 +259,15 @@ export async function saveMagazineOfflineData(
   feedTitle?: string,
   options?: SaveBlobOptions,
 ): Promise<void> {
+  const coverCacheKey = await cacheAuxiliaryBlob(coverUrl, `/offline/magazines/${entryId}/cover`);
+
   await upsertOfflineBlob(
     {
       type: 'magazine',
       id: entryId,
       title,
       cacheKey: `/offline/magazines/${entryId}`,
+      coverCacheKey,
       coverUrl,
       feedTitle,
     },
@@ -304,9 +359,14 @@ export async function pruneRecentOfflineItems(
 // ── Remove ──
 
 export async function removeOfflineItem(cacheKey: string): Promise<void> {
+  const existing = getOfflineRegistry().find((item) => item.cacheKey === cacheKey) ?? null;
+
   try {
     const cache = await openOfflineCache();
     await cache.delete(cacheKey);
+    if (existing?.coverCacheKey) {
+      await cache.delete(existing.coverCacheKey);
+    }
   } catch {
     // Cache API not available — still clean the registry
   }

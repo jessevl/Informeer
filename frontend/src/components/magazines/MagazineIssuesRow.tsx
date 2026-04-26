@@ -12,7 +12,8 @@ import { api } from '@/api/client';
 import type { MagazineIssue } from '@/stores/magazines';
 import type { MagazineGroup } from './MagazineStack';
 import { saveMagazineOffline, removeOfflineItem } from '@/lib/offline/blob-cache';
-import { useIsOffline } from '@/stores/offline';
+import { useOfflineItem } from '@/stores/offline';
+import { useCachedImageUrl } from '@/hooks/useCachedImageUrl';
 
 interface ReadingProgress {
   maxPage: number;
@@ -219,10 +220,16 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
   const [localFailed, setLocalFailed] = useState(issue.downloadFailed || false);
   const hasProgress = progress && progress.maxPage > 0 && progress.totalPages > 0;
   const progressPercent = hasProgress ? (progress.maxPage / progress.totalPages) * 100 : 0;
+  const isRead = progressPercent >= 90;
 
   // Offline state
-  const isSavedOffline = useIsOffline('magazine', issue.id);
+  const offlineItem = useOfflineItem('magazine', issue.id);
+  const isSavedOffline = offlineItem != null;
   const [isSavingOffline, setIsSavingOffline] = useState(false);
+  const coverImageUrl = useCachedImageUrl({
+    cacheKey: offlineItem?.coverCacheKey,
+    imageUrl: issue.coverUrl,
+  });
 
   const handleToggleOffline = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -279,12 +286,13 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
           'transition-all duration-250 ease-out',
           'group-hover/thumb:scale-[1.03] group-hover/thumb:-translate-y-0.5',
           'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]',
-          'cursor-pointer'
+          'cursor-pointer',
+          isRead && !localFailed && 'opacity-70 [filter:saturate(0.62)_contrast(0.88)_brightness(1.03)]'
         )}
       >
-        {issue.coverUrl ? (
+        {coverImageUrl ? (
           <img
-            src={issue.coverUrl}
+            src={coverImageUrl}
             alt={issue.title}
             className={cn(
               'w-full h-full object-cover',
@@ -360,6 +368,12 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
             Saved
           </div>
         )}
+        {isRead && !localFailed && (
+          <div className="absolute top-1 left-1 flex items-center gap-0.5 rounded-full bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--color-text-secondary)] backdrop-blur-sm z-10">
+            <Check size={7} />
+            Read
+          </div>
+        )}
 
         {/* Save offline button (on hover) */}
         {!localFailed && (
@@ -392,7 +406,7 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
         <p
           className={cn(
             'text-[11px] font-medium leading-tight',
-            'text-[var(--color-text-primary)]',
+            isRead ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-primary)]',
             'line-clamp-2',
             'group-hover/thumb:text-[var(--color-accent)]',
             'transition-colors cursor-pointer'

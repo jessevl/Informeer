@@ -4,7 +4,7 @@
  * Based on PodcastsView pattern but for video content (YouTube, video feeds, etc.)
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { cn, formatRelativeTime, formatDuration, getExcerpt } from '@/lib/utils';
 import { 
   Play, 
@@ -19,12 +19,19 @@ import {
   ListPlus,
 } from 'lucide-react';
 import { FeedIcon } from '@/components/feeds/FeedIcon';
-import { EntryList } from '@/components/entries/EntryList';
 import { useVideoStore, getVideoEnclosure, isVideoEntry, getVideoInfo } from '@/stores/video';
 import { useMediaQueueStore } from '@/stores/mediaQueue';
 import { useSettingsStore } from '@/stores/settings';
 import type { Entry, Feed, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
+import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import {
+  PaginatedOverviewSurface,
+  useMeasuredContainerSize,
+  usePaginatedItems,
+  useResponsiveGridPageSize,
+  useResponsiveListPageSize,
+} from '@/components/overview/PaginatedOverview';
 
 interface VideosViewProps {
   feeds: Feed[];
@@ -45,6 +52,114 @@ function isYouTubeShort(entry: Entry): boolean {
     url.includes('youtube.com/shorts/') ||
     content.includes('youtube.com/shorts/') ||
     title.includes('#shorts')
+  );
+}
+
+function getVideoGridColumns(width: number): number {
+  if (width >= 1700) return 6;
+  if (width >= 1400) return 5;
+  if (width >= 1100) return 4;
+  if (width >= 760) return 3;
+  return 2;
+}
+
+function useVideoGridColumns(): number {
+  const [columns, setColumns] = useState(() => getVideoGridColumns(window.innerWidth));
+
+  useEffect(() => {
+    const handleResize = () => setColumns(getVideoGridColumns(window.innerWidth));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return columns;
+}
+
+function PaginatedVideoCollection({
+  entries,
+  viewMode,
+  onSelectEntry,
+  chromeOffset,
+  paginated,
+}: {
+  entries: Entry[];
+  viewMode: ViewMode;
+  onSelectEntry: (entry: Entry) => void;
+  chromeOffset: number;
+  paginated: boolean;
+}) {
+  const { isEntryWatched } = useVideoStore();
+  const gridColumns = useVideoGridColumns();
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const overviewSize = useMeasuredContainerSize(overviewRef);
+  const cardsPerPage = useResponsiveGridPageSize({
+    columns: gridColumns,
+    aspectRatio: 16 / 9,
+    metaHeight: 96,
+    containerSize: overviewSize,
+    gap: 12,
+    chromeOffset,
+  });
+  const listPerPage = useResponsiveListPageSize({
+    itemHeight: 148,
+    containerSize: overviewSize,
+    gap: 8,
+    chromeOffset,
+  });
+  const magazinePerPage = useResponsiveListPageSize({
+    itemHeight: 320,
+    containerSize: overviewSize,
+    gap: 16,
+    chromeOffset,
+  });
+  const itemsPerPage = viewMode === 'cards'
+    ? cardsPerPage
+    : viewMode === 'list'
+      ? listPerPage
+      : magazinePerPage;
+  const pagedEntries = usePaginatedItems(entries, itemsPerPage);
+  const visibleEntries = paginated ? pagedEntries.pageItems : entries;
+
+  const content = (
+    <div
+      className={cn(
+        'p-4 pb-10',
+        viewMode === 'cards' && 'grid gap-3',
+        viewMode === 'list' && 'space-y-2',
+        viewMode === 'magazine' && 'space-y-4 max-w-4xl mx-auto'
+      )}
+      style={viewMode === 'cards' ? { gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` } : undefined}
+    >
+      {visibleEntries.map((entry) => (
+        <VideoCard
+          key={entry.id}
+          entry={entry}
+          viewMode={viewMode}
+          onSelect={() => onSelectEntry(entry)}
+          isWatched={isEntryWatched(entry.id)}
+        />
+      ))}
+    </div>
+  );
+
+  if (!paginated) {
+    return <div className="h-full min-h-0 overflow-y-auto">{content}</div>;
+  }
+
+  return (
+    <div ref={overviewRef} className="h-full min-h-0">
+      <PaginatedOverviewSurface
+        currentPage={pagedEntries.currentPage}
+        pageCount={pagedEntries.pageCount}
+        totalItems={entries.length}
+        rangeStart={pagedEntries.rangeStart}
+        rangeEnd={pagedEntries.rangeEnd}
+        onPrevPage={pagedEntries.goToPrevPage}
+        onNextPage={pagedEntries.goToNextPage}
+      >
+        {content}
+      </PaginatedOverviewSurface>
+    </div>
   );
 }
 
@@ -388,12 +503,14 @@ function ChannelDetail({
   viewMode,
   onSelectEntry,
   onPlayAll,
+  paginated,
 }: {
   feed: Feed;
   entries: Entry[];
   viewMode: ViewMode;
   onSelectEntry: (entry: Entry) => void;
   onPlayAll: () => void;
+  paginated: boolean;
 }) {
   const { isEntryWatched } = useVideoStore();
   const videoEntries = entries
@@ -434,23 +551,14 @@ function ChannelDetail({
       </div>
 
       {/* Videos */}
-      <div className="flex-1 overflow-y-auto p-4 content-below-header content-above-navbar">
-        <div className={cn(
-          viewMode === 'cards' && "grid grid-cols-2 @sm:grid-cols-2 @md:grid-cols-3 @lg:grid-cols-4 gap-3",
-          viewMode === 'list' && "space-y-2",
-          viewMode === 'magazine' && "space-y-4 max-w-4xl mx-auto"
-        )}>
-          {videoEntries.map(entry => (
-            <VideoCard
-              key={entry.id}
-              entry={entry}
-              viewMode={viewMode}
-              onSelect={() => onSelectEntry(entry)}
-              showFeedInfo={false}
-              isWatched={isEntryWatched(entry.id)}
-            />
-          ))}
-        </div>
+      <div className="flex-1 min-h-0 content-below-header content-above-navbar">
+        <PaginatedVideoCollection
+          entries={videoEntries}
+          viewMode={viewMode}
+          onSelectEntry={onSelectEntry}
+          chromeOffset={320}
+          paginated={paginated}
+        />
       </div>
     </div>
   );
@@ -466,8 +574,9 @@ export function VideosView({
   onSelectChannel,
 }: VideosViewProps) {
   const { isEntryWatched, playSeriesFromEntry } = useVideoStore();
-  const handleNoopLoadMore = useCallback(() => {}, []);
   const videoCategoryId = useSettingsStore((s) => s.videoCategoryId);
+  const einkMode = useSettingsStore((s) => s.einkMode);
+  const { effectiveOffline } = useEffectiveOfflineState();
 
   // Get video feeds from the configured category
   const videoFeeds = useMemo(() => 
@@ -506,36 +615,14 @@ export function VideosView({
   // If a channel is selected, show channel detail
   if (selectedFeed) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="px-4 pt-14 pb-2">
-          <button
-            onClick={() => handlePlaySeries(selectedFeed)}
-            className={cn(
-              "inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
-              "bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-hover)]",
-              "shadow-md hover:shadow-lg"
-            )}
-          >
-            <PlayCircle size={16} />
-            Play Channel
-          </button>
-        </div>
-        <div className="flex-1 min-h-0">
-          <EntryList
-            entries={selectedChannelVideos}
-            selectedEntry={null}
-            isLoading={false}
-            hasMore={false}
-            title={selectedFeed.title}
-            count={selectedChannelVideos.length}
-            onSelectEntry={onSelectEntry}
-            onLoadMore={handleNoopLoadMore}
-            onRefresh={onRefresh}
-            viewMode={viewMode}
-            showImages={true}
-          />
-        </div>
-      </div>
+      <ChannelDetail
+        feed={selectedFeed}
+        entries={selectedChannelVideos}
+        viewMode={viewMode}
+        onSelectEntry={onSelectEntry}
+        onPlayAll={() => handlePlaySeries(selectedFeed)}
+        paginated={einkMode}
+      />
     );
   }
 
@@ -556,21 +643,31 @@ export function VideosView({
     );
   }
 
+  if (effectiveOffline) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center p-8 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-[var(--color-surface-secondary)] flex items-center justify-center mb-4">
+          <MonitorPlay size={40} className="text-[var(--color-text-tertiary)]" />
+        </div>
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
+          Video unavailable offline
+        </h2>
+        <p className="text-sm text-[var(--color-text-tertiary)] max-w-sm">
+          Videos stay hidden while the app is offline because playback depends on live online sources.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full relative">
-      <div className="flex-1 min-h-0">
-        <EntryList
+      <div className="flex-1 min-h-0 content-below-header content-above-navbar">
+        <PaginatedVideoCollection
           entries={recentVideos}
-          selectedEntry={null}
-          isLoading={false}
-          hasMore={false}
-          title="Video"
-          count={recentVideos.length}
-          onSelectEntry={onSelectEntry}
-          onLoadMore={handleNoopLoadMore}
-          onRefresh={onRefresh}
           viewMode={viewMode}
-          showImages={true}
+          onSelectEntry={onSelectEntry}
+          chromeOffset={230}
+          paginated={einkMode}
         />
       </div>
     </div>

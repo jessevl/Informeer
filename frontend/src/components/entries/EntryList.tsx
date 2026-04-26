@@ -6,8 +6,8 @@
  * Mobile: Adjusts padding for mobile header/nav
  */
 
-import { useRef, useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Rss, Star, Play, Pause } from 'lucide-react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { RefreshCw, Rss, Star, Play, Pause, Check } from 'lucide-react';
 import { useBreakpoint, useVirtualizer, type VirtualItem } from '@/lib/masonry';
 import { cn, getExcerpt, extractFirstImage, formatRelativeTime, formatReadingTime } from '@/lib/utils';
 import { useIsMobile } from '@frameer/hooks/useMobileDetection';
@@ -22,6 +22,11 @@ import type { Entry, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
 import { einkPower } from '@/services/eink-power';
+import {
+  PaginatedOverviewSurface,
+  useMeasuredContainerSize,
+  usePaginatedItems,
+} from '@/components/overview/PaginatedOverview';
 
 const EINK_INTERACTION_SETTLE_MS = 180;
 const EINK_MASONRY_LAYOUT_SETTLE_MS = 240;
@@ -181,7 +186,8 @@ function CardItem({
         'group relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200',
         'bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)]',
         'hover:shadow-lg hover:border-[var(--color-border-default)]',
-        isSelected && 'ring-2 ring-[var(--color-accent-primary)] border-transparent'
+        isSelected && 'ring-2 ring-[var(--color-accent-primary)] border-transparent',
+        !isUnread && !isSelected && 'bg-[color-mix(in_srgb,var(--color-surface-secondary)_68%,transparent)] opacity-70'
       )}
     >
       {/* Cover Image */}
@@ -232,11 +238,17 @@ function CardItem({
           {isUnread && <span className="w-2 h-2 rounded-full bg-[var(--color-accent-fg)]" />}
           <FeedIcon feedId={entry.feed_id} iconId={entry.feed?.icon?.icon_id} size={14} className="rounded-sm" />
           <span className="text-xs text-[var(--color-text-tertiary)] truncate">{entry.feed?.title}</span>
+          {!isUnread && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--color-surface-primary)_86%,transparent)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)]">
+              <Check size={10} />
+              Read
+            </span>
+          )}
         </div>
         
         <h3 className={cn(
           'text-sm leading-snug line-clamp-2 mb-2',
-          isUnread ? 'font-medium text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
+          isUnread ? 'font-medium text-[var(--color-text-primary)]' : 'font-normal text-[var(--color-text-tertiary)]'
         )}>{entry.title}</h3>
         
         {excerpt && excerptLines > 0 && (
@@ -280,6 +292,16 @@ function CardItem({
 
 // Threshold for considering an article "long" (in minutes)
 const LONG_ARTICLE_THRESHOLD = 8;
+const MAGAZINE_CARD_WIDE_ARTICLE_THRESHOLD = 5;
+const MAGAZINE_CARD_WIDE_ARTICLE_THRESHOLD_TWO_LANE = 8;
+const MAGAZINE_CARD_ESTIMATED_WIDTH = 320;
+const MAGAZINE_CARD_SINGLE_MEDIA_ASPECT_RATIO = 16 / 9;
+const MAGAZINE_CARD_WIDE_MEDIA_ASPECT_RATIO = 4;
+const MAGAZINE_CARD_MIN_CHARS_PER_LINE = 34;
+const MAGAZINE_CARD_HORIZONTAL_PADDING = 32;
+const MAGAZINE_CARD_MAX_SINGLE_EXCERPT_LINES = 16;
+const MAGAZINE_CARD_MAX_WIDE_EXCERPT_LINES = 20;
+const PAGINATED_MAGAZINE_CONTENT_PADDING = 32;
 
 // Helper to get audio enclosure from entry
 function getAudioEnclosure(entry: Entry): Enclosure | null {
@@ -336,44 +358,67 @@ function MagazineItem({
   onSelect, 
   showImages = true,
   baseExcerptLines = 4,
+  excerptLinesOverride,
+  targetHeight,
+  excerptCharBudget,
+  colSpan = 1,
 }: { 
   entry: Entry; 
   onSelect: (entry: Entry) => void;
   showImages?: boolean;
   baseExcerptLines?: number;
+  excerptLinesOverride?: number;
+  targetHeight?: number;
+  excerptCharBudget?: number;
+  colSpan?: number;
 }) {
   const [imageError, setImageError] = useState(false);
   const isUnread = entry.status === 'unread';
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
   const imageUrl = showImages ? (entry.image_url || extractFirstImage(entry.content)) : null;
   const { audioEnclosure, videoInfo, isPodcast, isVideo, thumbnailUrl, progressPercent, hasProgress } = useMediaProgress(entry);
-  const displayThumb = !imageError ? (thumbnailUrl || imageUrl) : null;
+  const mediaUrl = thumbnailUrl || imageUrl;
+  const hasMediaFrame = Boolean(mediaUrl);
+  const displayThumb = !imageError ? mediaUrl : null;
   
   // Adjust excerpt lines based on reading time
   const readingTime = entry.reading_time || 0;
-  const excerptLines = readingTime < 3 ? Math.max(1, baseExcerptLines - 2) 
-    : readingTime < LONG_ARTICLE_THRESHOLD ? baseExcerptLines : baseExcerptLines + 2;
-  const excerpt = getExcerpt(entry.content, excerptLines * 60);
+  const preferredExcerptLines = getPreferredMagazineExcerptLines(readingTime, baseExcerptLines);
+  const excerptLines = excerptLinesOverride ?? preferredExcerptLines;
+  const excerpt = getExcerpt(entry.content, excerptCharBudget ?? excerptLines * 60);
   
   return (
     <article
       onClick={() => onSelect(entry)}
       className={cn(
-        'group rounded-xl overflow-hidden cursor-pointer transition-all duration-200',
+        'group rounded-xl overflow-hidden cursor-pointer transition-all duration-200 flex flex-col',
         'bg-[var(--color-surface-base)] border border-[var(--color-border-subtle)]',
-        'hover:shadow-lg hover:border-[var(--color-border-default)] hover:scale-[1.01]'
+        'hover:shadow-lg hover:border-[var(--color-border-default)] hover:scale-[1.01]',
+        !isUnread && 'bg-[color-mix(in_srgb,var(--color-surface-secondary)_68%,transparent)] opacity-70'
       )}
+      style={targetHeight != null ? { height: targetHeight } : undefined}
     >
       {/* Cover Image / Video Thumbnail */}
-      {displayThumb && (
-        <div className="aspect-video bg-[var(--color-surface-inset)] overflow-hidden flex-shrink-0 relative">
-          <img 
-            src={displayThumb}
-            alt="" 
-            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-            loading="lazy"
-            onError={() => setImageError(true)}
-          />
+      {hasMediaFrame && (
+        <div
+          className={cn(
+            'bg-[var(--color-surface-inset)] overflow-hidden flex-shrink-0 relative',
+            colSpan > 1 ? 'aspect-[4/1]' : 'aspect-video',
+          )}
+        >
+          {displayThumb ? (
+            <img 
+              src={displayThumb}
+              alt="" 
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+              loading="lazy"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[var(--color-surface-secondary)]">
+              <FeedIcon feedId={entry.feed_id} iconId={entry.feed?.icon?.icon_id} size={56} className="opacity-70" />
+            </div>
+          )}
           
           {/* Media play button overlay — pointer-events-none on the overlay itself
              so taps pass through to the card. Only the buttons are interactive.
@@ -405,11 +450,17 @@ function MagazineItem({
       )}
       
       {/* Content */}
-      <div className="p-4">
+      <div className={cn('p-4', targetHeight != null && 'flex min-h-0 flex-1 flex-col')}>
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <FeedIcon feedId={entry.feed_id} iconId={entry.feed?.icon?.icon_id} size={14} />
           {isUnread && <span className="w-2 h-2 rounded-full bg-[var(--color-accent-fg)] flex-shrink-0" />}
           <span className="text-xs font-medium text-[var(--color-text-secondary)] truncate">{entry.feed?.title}</span>
+          {!isUnread && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--color-surface-primary)_86%,transparent)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)]">
+              <Check size={10} />
+              Read
+            </span>
+          )}
           <span className="text-[var(--color-text-disabled)]">·</span>
           <span className="text-xs text-[var(--color-text-tertiary)]">{formatRelativeTime(entry.published_at)}</span>
           {entry.starred && <span className="text-amber-500 text-xs">★</span>}
@@ -417,18 +468,18 @@ function MagazineItem({
         
         <h3 className={cn(
           'text-base leading-tight mb-2 line-clamp-3',
-          isUnread ? 'font-semibold text-[var(--color-text-primary)]' : 'font-medium text-[var(--color-text-secondary)]'
+          isUnread ? 'font-semibold text-[var(--color-text-primary)]' : 'font-medium text-[var(--color-text-tertiary)]'
         )}>{entry.title}</h3>
         
-        {excerpt && (
+        {excerpt && excerptLines > 0 && (
           <p className="text-sm text-[var(--color-text-tertiary)] leading-relaxed"
             style={{ display: '-webkit-box', WebkitLineClamp: excerptLines, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {excerpt}
           </p>
         )}
         
-        <div className="mt-3 flex items-center gap-2">
-          {!displayThumb && !isVideo && (
+        <div className={cn('mt-3 flex items-center gap-2', targetHeight != null && 'mt-auto pt-3')}>
+          {!hasMediaFrame && !isVideo && (
             <>
               {isPodcast && audioEnclosure ? (
                 <div onClick={(e) => e.stopPropagation()}>
@@ -439,17 +490,17 @@ function MagazineItem({
               ) : null}
             </>
           )}
-          {showReadingTime && displayThumb && !isPodcast && !isVideo && entry.reading_time > 0 && (
+          {showReadingTime && hasMediaFrame && !isPodcast && !isVideo && entry.reading_time > 0 && (
             <span className="text-xs text-[var(--color-text-disabled)]">{formatReadingTime(entry.reading_time)} read</span>
           )}
-          {displayThumb && isPodcast && !isVideo && audioEnclosure && (
+          {hasMediaFrame && isPodcast && !isVideo && audioEnclosure && (
             <div onClick={(e) => e.stopPropagation()}>
               <AudioPlayButton entry={entry} enclosure={audioEnclosure} size="xs" variant="ghost" showLabel showAddToQueue />
             </div>
           )}
         </div>
         
-        {hasProgress && !displayThumb && (
+        {hasProgress && !hasMediaFrame && (
           <div className="mt-2 h-1 bg-[var(--color-surface-tertiary)] rounded-full overflow-hidden">
             <div className="h-full bg-[var(--color-accent-primary)] rounded-full" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
           </div>
@@ -469,8 +520,421 @@ const masonryBreakpoints = [
 
 // Height estimates for masonry items
 const CARD_BASE_HEIGHT = 120;
-const CARD_IMAGE_HEIGHT = 180;
 const CARD_EXCERPT_HEIGHT_PER_LINE = 20;
+const MAGAZINE_CARD_MIN_EXCERPT_LINES = 1;
+
+interface MagazineCardSizing {
+  baseHeight: number;
+  minLines: number;
+  preferredLines: number;
+  maxLines: number;
+  excerptCharsPerLine: number;
+  colSpan: number;
+}
+
+function getMagazineCardPreferredColSpan(entry: Entry, lanes: number): number {
+  if (lanes < 2) {
+    return 1;
+  }
+
+  const readingTime = entry.reading_time || 0;
+
+  // Very short items (news briefs ≤ 2 min) stay narrow for visual contrast
+  if (readingTime < 3) {
+    return 1;
+  }
+
+  // Articles with a direct image URL look better in the wide 4:1 landscape crop
+  if (entry.image_url && readingTime >= 4) {
+    return 2;
+  }
+
+  const threshold = lanes === 2
+    ? MAGAZINE_CARD_WIDE_ARTICLE_THRESHOLD_TWO_LANE
+    : MAGAZINE_CARD_WIDE_ARTICLE_THRESHOLD;
+
+  return readingTime >= threshold ? 2 : 1;
+}
+
+function getMagazineCardCandidateColSpans(entry: Entry, lanes: number): number[] {
+  const preferredColSpan = Math.min(Math.max(1, lanes), getMagazineCardPreferredColSpan(entry, lanes));
+  return preferredColSpan > 1 ? [preferredColSpan, 1] : [1];
+}
+
+function getMagazineCardMediaHeight(cardWidth: number, hasImage: boolean, colSpan: number): number {
+  if (!hasImage) {
+    return 0;
+  }
+
+  const aspectRatio = colSpan > 1
+    ? MAGAZINE_CARD_WIDE_MEDIA_ASPECT_RATIO
+    : MAGAZINE_CARD_SINGLE_MEDIA_ASPECT_RATIO;
+
+  return Math.round(cardWidth / aspectRatio);
+}
+
+function getMagazineExcerptCharactersPerLine(cardWidth: number): number {
+  return Math.max(
+    MAGAZINE_CARD_MIN_CHARS_PER_LINE,
+    Math.floor(Math.max(160, cardWidth - MAGAZINE_CARD_HORIZONTAL_PADDING) / 7),
+  );
+}
+
+function getScrollContainerVerticalPadding(element: HTMLElement | null): number {
+  if (!element || typeof window === 'undefined') {
+    return 0;
+  }
+
+  const computedStyle = window.getComputedStyle(element);
+  return (parseFloat(computedStyle.paddingTop) || 0) + (parseFloat(computedStyle.paddingBottom) || 0);
+}
+
+function getPreferredMagazineExcerptLines(readingTime: number, baseExcerptLines: number): number {
+  if (readingTime < 3) {
+    return Math.max(MAGAZINE_CARD_MIN_EXCERPT_LINES, baseExcerptLines - 2);
+  }
+
+  if (readingTime < LONG_ARTICLE_THRESHOLD) {
+    return baseExcerptLines;
+  }
+
+  return baseExcerptLines + 2;
+}
+
+function getMagazineCardSizing(
+  entry: Entry,
+  showImages: boolean,
+  baseExcerptLines: number,
+  cardWidth: number,
+  colSpan: number,
+): MagazineCardSizing {
+  const hasImage = Boolean(showImages && (entry.image_url || extractFirstImage(entry.content)));
+  const normalizedColSpan = Math.max(1, Math.min(2, colSpan));
+  const preferredLines = getPreferredMagazineExcerptLines(entry.reading_time || 0, baseExcerptLines)
+    + (normalizedColSpan > 1 ? 1 : 0);
+  const lineFlex = Math.max(2, Math.ceil(baseExcerptLines / 2));
+
+  return {
+    baseHeight: CARD_BASE_HEIGHT + getMagazineCardMediaHeight(cardWidth, hasImage, normalizedColSpan),
+    minLines: Math.max(MAGAZINE_CARD_MIN_EXCERPT_LINES, preferredLines - lineFlex),
+    preferredLines,
+    maxLines: Math.min(
+      normalizedColSpan > 1 ? MAGAZINE_CARD_MAX_WIDE_EXCERPT_LINES : MAGAZINE_CARD_MAX_SINGLE_EXCERPT_LINES,
+      preferredLines + lineFlex + 3,
+    ),
+    excerptCharsPerLine: getMagazineExcerptCharactersPerLine(cardWidth),
+    colSpan: normalizedColSpan,
+  };
+}
+
+function getMagazineCardHeight(baseHeight: number, excerptLines: number): number {
+  return baseHeight + excerptLines * CARD_EXCERPT_HEIGHT_PER_LINE;
+}
+
+function estimateMagazineItemHeight(entry: Entry, showImages: boolean, excerptLines: number): number {
+  const sizing = getMagazineCardSizing(entry, showImages, excerptLines, MAGAZINE_CARD_ESTIMATED_WIDTH, 1);
+  return getMagazineCardHeight(sizing.baseHeight, sizing.preferredLines);
+}
+
+interface PaginatedMagazineItemLayout {
+  entry: Entry;
+  lane: number;
+  top: number;
+  height: number;
+  excerptLines: number;
+  excerptCharBudget: number;
+  colSpan: number;
+}
+
+interface PaginatedMagazinePage {
+  items: PaginatedMagazineItemLayout[];
+  totalHeight: number;
+  startIndex: number;
+  endIndex: number;
+}
+
+function getShortestLanePlacement(laneHeights: number[], colSpan: number): { lane: number; top: number } {
+  const normalizedColSpan = Math.max(1, Math.min(colSpan, laneHeights.length));
+  let bestLane = 0;
+  let bestTop = Number.POSITIVE_INFINITY;
+
+  for (let lane = 0; lane <= laneHeights.length - normalizedColSpan; lane += 1) {
+    const top = Math.max(...laneHeights.slice(lane, lane + normalizedColSpan));
+    if (top < bestTop) {
+      bestLane = lane;
+      bestTop = top;
+    }
+  }
+
+  return {
+    lane: bestLane,
+    top: Number.isFinite(bestTop) ? bestTop : 0,
+  };
+}
+
+function buildPaginatedMagazinePages(
+  entries: Entry[],
+  lanes: number,
+  availableHeight: number,
+  getCardSizing: (entry: Entry, colSpan: number) => MagazineCardSizing,
+  gap: number,
+): PaginatedMagazinePage[] {
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const normalizedLanes = Math.max(1, lanes);
+  const maxPageHeight = Math.max(320, availableHeight);
+  const pages: PaginatedMagazinePage[] = [];
+
+  let currentItems: PaginatedMagazineItemLayout[] = [];
+  let laneHeights = new Array(normalizedLanes).fill(0) as number[];
+  let pageStartIndex = 0;
+
+  const finalizePage = (endIndex: number) => {
+    const pageItems = currentItems.map((item) => ({ ...item }));
+    const laneLastItemIndices = new Array(normalizedLanes).fill(-1);
+
+    pageItems.forEach((item, index) => {
+      for (let laneIndex = item.lane; laneIndex < item.lane + item.colSpan; laneIndex += 1) {
+        laneLastItemIndices[laneIndex] = index;
+      }
+    });
+
+    Array.from(new Set(laneLastItemIndices.filter((itemIndex) => itemIndex >= 0))).forEach((itemIndex) => {
+      if (itemIndex < 0) return;
+
+      const item = pageItems[itemIndex];
+      const sizing = getCardSizing(item.entry, item.colSpan);
+      let remainingHeight = maxPageHeight - (item.top + item.height);
+
+      if (remainingHeight <= 0) return;
+
+      const extraLinesAllowed = Math.max(0, sizing.maxLines - item.excerptLines);
+      const extraLines = Math.min(
+        extraLinesAllowed,
+        Math.floor(remainingHeight / CARD_EXCERPT_HEIGHT_PER_LINE),
+      );
+
+      if (extraLines > 0) {
+        item.excerptLines += extraLines;
+        item.height += extraLines * CARD_EXCERPT_HEIGHT_PER_LINE;
+        item.excerptCharBudget = item.excerptLines * sizing.excerptCharsPerLine;
+        remainingHeight -= extraLines * CARD_EXCERPT_HEIGHT_PER_LINE;
+      }
+
+      if (remainingHeight > 0) {
+        item.height += remainingHeight;
+      }
+    });
+
+    pages.push({
+      items: pageItems,
+      totalHeight: maxPageHeight,
+      startIndex: pageStartIndex,
+      endIndex,
+    });
+  };
+
+  const getFittingExcerptLines = (sizing: MagazineCardSizing, remainingHeight: number) => {
+    const maxFittingLines = Math.floor((remainingHeight - sizing.baseHeight) / CARD_EXCERPT_HEIGHT_PER_LINE);
+    if (maxFittingLines < sizing.minLines) {
+      return null;
+    }
+
+    return Math.max(
+      sizing.minLines,
+      Math.min(sizing.preferredLines, sizing.maxLines, maxFittingLines),
+    );
+  };
+
+  entries.forEach((entry, index) => {
+    const candidateColSpans = getMagazineCardCandidateColSpans(entry, normalizedLanes);
+    let placement: {
+      lane: number;
+      top: number;
+      excerptLines: number;
+      sizing: MagazineCardSizing;
+    } | null = null;
+
+    for (const candidateColSpan of candidateColSpans) {
+      const sizing = getCardSizing(entry, candidateColSpan);
+      const lanePlacement = getShortestLanePlacement(laneHeights, sizing.colSpan);
+      const excerptLines = getFittingExcerptLines(sizing, maxPageHeight - lanePlacement.top);
+
+      if (excerptLines === null) {
+        continue;
+      }
+
+      placement = {
+        lane: lanePlacement.lane,
+        top: lanePlacement.top,
+        excerptLines,
+        sizing,
+      };
+      break;
+    }
+
+    if (placement === null && currentItems.length > 0) {
+      finalizePage(index - 1);
+      currentItems = [];
+      laneHeights = new Array(normalizedLanes).fill(0);
+      pageStartIndex = index;
+
+      for (const candidateColSpan of candidateColSpans) {
+        const sizing = getCardSizing(entry, candidateColSpan);
+        const excerptLines = getFittingExcerptLines(sizing, maxPageHeight);
+
+        if (excerptLines === null) {
+          continue;
+        }
+
+        placement = {
+          lane: 0,
+          top: 0,
+          excerptLines,
+          sizing,
+        };
+        break;
+      }
+    }
+
+    if (placement === null) {
+      const sizing = getCardSizing(entry, 1);
+      placement = {
+        lane: 0,
+        top: 0,
+        excerptLines: sizing.minLines,
+        sizing,
+      };
+    }
+
+    const itemHeight = Math.min(
+      maxPageHeight - placement.top,
+      getMagazineCardHeight(placement.sizing.baseHeight, placement.excerptLines),
+    );
+
+    currentItems.push({
+      entry,
+      lane: placement.lane,
+      top: placement.top,
+      height: itemHeight,
+      excerptLines: placement.excerptLines,
+      excerptCharBudget: placement.excerptLines * placement.sizing.excerptCharsPerLine,
+      colSpan: placement.sizing.colSpan,
+    });
+
+    for (let laneIndex = placement.lane; laneIndex < placement.lane + placement.sizing.colSpan; laneIndex += 1) {
+      laneHeights[laneIndex] = placement.top + itemHeight + gap;
+    }
+  });
+
+  if (currentItems.length > 0) {
+    finalizePage(entries.length - 1);
+  }
+
+  return pages;
+}
+
+function PaginatedMagazineFeed({
+  entries,
+  onSelect,
+  showImages,
+  excerptLines,
+  scrollContainerRef,
+  hasMore,
+  isLoading,
+  isLoadingMore,
+  onLoadMore,
+  onLayoutActivity,
+}: VirtualizedMasonryProps) {
+  const { currentBreakpoint } = useBreakpoint(masonryBreakpoints);
+  const containerSize = useMeasuredContainerSize(scrollContainerRef);
+  const lanes = currentBreakpoint.nCol;
+  const columnGap = 16;
+  const scrollContainer = scrollContainerRef.current;
+  const measuredContainerHeight = scrollContainer?.clientHeight ?? containerSize?.height ?? (window.innerHeight - 240);
+  const measuredContainerWidth = scrollContainer?.clientWidth ?? containerSize?.width ?? window.innerWidth;
+  const availableHeight = Math.max(
+    320,
+    measuredContainerHeight
+      - getScrollContainerVerticalPadding(scrollContainer)
+      - PAGINATED_MAGAZINE_CONTENT_PADDING,
+  );
+  const gridWidth = Math.max(240, measuredContainerWidth - PAGINATED_MAGAZINE_CONTENT_PADDING);
+  const laneWidth = Math.max(160, (gridWidth - columnGap * (Math.max(1, lanes) - 1)) / Math.max(1, lanes));
+
+  const getCardSizing = useCallback((entry: Entry, colSpan: number) => {
+    const normalizedColSpan = Math.max(1, Math.min(colSpan, Math.max(1, lanes)));
+    const cardWidth = laneWidth * normalizedColSpan + columnGap * (normalizedColSpan - 1);
+    return getMagazineCardSizing(entry, showImages, excerptLines, cardWidth, normalizedColSpan);
+  }, [columnGap, excerptLines, laneWidth, lanes, showImages]);
+
+  const pageLayouts = useMemo(() => {
+    return buildPaginatedMagazinePages(entries, lanes, availableHeight, getCardSizing, columnGap);
+  }, [entries, lanes, availableHeight, getCardSizing]);
+
+  const pagedLayouts = usePaginatedItems(pageLayouts, 1);
+  const currentPageLayout = pagedLayouts.pageItems[0] ?? null;
+  const normalizedLanes = Math.max(1, lanes);
+  const columnWidth = 100 / normalizedLanes;
+
+  useEffect(() => {
+    onLayoutActivity?.();
+  }, [onLayoutActivity, pagedLayouts.currentPage, entries.length, lanes, showImages, excerptLines]);
+
+  useEffect(() => {
+    if (!hasMore || isLoading || isLoadingMore) return;
+    if (pagedLayouts.currentPage < pagedLayouts.pageCount - 1) return;
+    onLoadMore();
+  }, [hasMore, isLoading, isLoadingMore, onLoadMore, pagedLayouts.currentPage, pagedLayouts.pageCount]);
+
+  return (
+    <PaginatedOverviewSurface
+      currentPage={pagedLayouts.currentPage}
+      pageCount={pagedLayouts.pageCount}
+      totalItems={entries.length}
+      rangeStart={currentPageLayout ? currentPageLayout.startIndex + 1 : 0}
+      rangeEnd={currentPageLayout ? currentPageLayout.endIndex + 1 : 0}
+      onPrevPage={pagedLayouts.goToPrevPage}
+      onNextPage={pagedLayouts.goToNextPage}
+      contentClassName="p-4"
+    >
+      <div
+        className="relative"
+        style={{ height: currentPageLayout?.totalHeight || 0 }}
+      >
+        {currentPageLayout?.items.map((item) => {
+          const left = item.lane * columnWidth;
+
+          return (
+            <div
+              key={item.entry.id}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: `calc(${left}% + ${item.lane * columnGap / normalizedLanes}px)`,
+                width: `calc(${columnWidth * item.colSpan}% - ${columnGap * (normalizedLanes - item.colSpan) / normalizedLanes}px)`,
+                transform: `translateY(${item.top}px)`,
+              }}
+            >
+              <MagazineItem
+                entry={item.entry}
+                onSelect={onSelect}
+                showImages={showImages}
+                baseExcerptLines={excerptLines}
+                excerptLinesOverride={item.excerptLines}
+                excerptCharBudget={item.excerptCharBudget}
+                targetHeight={item.height}
+                colSpan={item.colSpan}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </PaginatedOverviewSurface>
+  );
+}
 
 // Virtualized Masonry Component
 interface VirtualizedMasonryProps {
@@ -519,29 +983,7 @@ function VirtualizedMasonry({
   const estimateItemHeight = useCallback((index: number) => {
     const entry = entries[index];
     if (!entry) return 300;
-    
-    const hasImage = showImages && extractFirstImage(entry.content);
-    
-    let height = CARD_BASE_HEIGHT;
-    
-    if (hasImage) {
-      height += CARD_IMAGE_HEIGHT;
-    }
-    
-    // Excerpt lines based on reading time, using setting as average
-    const readingTime = entry.reading_time || 0;
-    let effectiveLines: number;
-    if (readingTime < 3) {
-      effectiveLines = Math.max(1, excerptLines - 2);
-    } else if (readingTime < LONG_ARTICLE_THRESHOLD) {
-      effectiveLines = excerptLines;
-    } else {
-      effectiveLines = excerptLines + 2;
-    }
-    
-    height += effectiveLines * CARD_EXCERPT_HEIGHT_PER_LINE;
-    
-    return height;
+    return estimateMagazineItemHeight(entry, showImages, excerptLines);
   }, [entries, showImages, excerptLines]);
 
   const lanes = currentBreakpoint.nCol;
@@ -773,7 +1215,7 @@ export function EntryList({
               : isPulling
                 ? 'feed-pulling'
                 : undefined,
-      gestureModel: 'scroll',
+      gestureModel: viewMode === 'magazine' && einkMode ? 'paginated' : 'scroll',
     });
 
     return () => {
@@ -788,7 +1230,7 @@ export function EntryList({
         });
       }
     };
-  }, [selectedEntry, modalEntry, isFeedSurfaceEligible, isLoading, isLoadingMore, isRefetching, isPTRRefreshing, isPulling]);
+  }, [selectedEntry, modalEntry, isFeedSurfaceEligible, isLoading, isLoadingMore, isRefetching, isPTRRefreshing, isPulling, viewMode, einkMode]);
 
   useEffect(() => {
     if (!isFeedSurfaceEligible) return;
@@ -946,8 +1388,20 @@ export function EntryList({
     }
     
     if (viewMode === 'magazine') {
-      // Magazine view using virtualized masonry
-      return (
+      return einkMode ? (
+        <PaginatedMagazineFeed
+          entries={entries}
+          onSelect={handleMagazineSelect}
+          showImages={showImages}
+          excerptLines={magazineExcerptLines}
+          scrollContainerRef={listRef}
+          hasMore={hasMore}
+          isLoading={isLoading}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={onLoadMore}
+          onLayoutActivity={handleMasonryLayoutActivity}
+        />
+      ) : (
         <VirtualizedMasonry
           entries={entries}
           onSelect={handleMagazineSelect}

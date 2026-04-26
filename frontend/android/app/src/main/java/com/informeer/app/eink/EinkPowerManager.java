@@ -241,17 +241,24 @@ public final class EinkPowerManager {
         int keyCode = event.getKeyCode();
         if (!isSupportedPageKey(keyCode)) return false;
 
-        if (event.getAction() != KeyEvent.ACTION_DOWN) {
-            return hibernating || waitingForInteractiveReady;
-        }
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
 
         WakeCommand command = wakeCommandForKey(keyCode);
         if (command == null) return false;
 
+        if (!hibernating && !waitingForInteractiveReady) {
+            // When already awake, prefer the page's own keydown handlers.
+            // That path is noticeably faster than bouncing through the native
+            // wake-command bridge, and non-ACTION_DOWN events stay consumed
+            // above so release/repeat handling doesn't trigger a second scroll.
+            return false;
+        }
+
         if (hibernating) {
-            resumeWebViewLocked("hardware-key");
-            queueWakeCommandLocked(command);
-            return true;
+            // Resume synchronously (same path as touch wake) so the event falls
+            // through to the now-awake WebView with the same latency as a tap.
+            resumeWebViewImmediateLocked("hardware-key");
+            return false;
         }
 
         if (waitingForInteractiveReady) {
@@ -259,12 +266,7 @@ public final class EinkPowerManager {
             return true;
         }
 
-        wakeCommandDispatchedCount++;
-        emitWakeCommandLocked(command, true);
-        reason = "hardware-key";
-        setStateLocked("active");
-        emitStateLocked();
-        return true;
+        return false;
     }
 
     // ════════════════════════════════════════════════════════════════════

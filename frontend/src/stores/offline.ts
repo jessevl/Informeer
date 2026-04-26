@@ -42,6 +42,14 @@ export function useIsOffline(type: OfflineItem['type'], id: string): boolean {
   return useOfflineStore(selector);
 }
 
+export function useOfflineItem(type: OfflineItem['type'], id: string): OfflineItem | null {
+  const selector = useCallback(
+    (s: OfflineState) => s.registry.find((item) => item.type === type && item.id === id) ?? null,
+    [type, id],
+  );
+  return useOfflineStore(selector);
+}
+
 /** Reactive access to the full registry */
 export function useOfflineRegistry(): OfflineItem[] {
   return useOfflineStore((s) => s.registry);

@@ -16,6 +16,36 @@ import { EPUBReader } from './EPUBReader';
 import { ZLibSearch } from './ZLibSearch';
 import { useOfflineRegistry } from '@/stores/offline';
 import { FilterBar } from '@/components/ui/FilterBar';
+import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import {
+  PaginatedOverviewSurface,
+  useMeasuredContainerSize,
+  usePaginatedItems,
+  useResponsiveGridPageSize,
+} from '@/components/overview/PaginatedOverview';
+import type { Book } from '@/types/api';
+
+function getBookGridColumns(width: number): number {
+  if (width >= 1700) return 8;
+  if (width >= 1450) return 7;
+  if (width >= 1200) return 6;
+  if (width >= 900) return 5;
+  if (width >= 640) return 4;
+  if (width >= 480) return 3;
+  return 2;
+}
+
+function useBookGridColumns(): number {
+  const [columns, setColumns] = useState(() => getBookGridColumns(window.innerWidth));
+
+  useEffect(() => {
+    const handleResize = () => setColumns(getBookGridColumns(window.innerWidth));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return columns;
+}
 
 /**
  * Floating header actions for the Books section.
@@ -98,12 +128,54 @@ export function BooksView() {
 
   // Sort & filter state
   type SortMode = 'recent' | 'title' | 'author';
-  type FilterMode = 'all' | 'unread' | 'reading' | 'finished' | 'offline';
+  type FilterMode = 'all' | 'unfinished' | 'unread' | 'reading' | 'finished' | 'offline';
   const [sortBy, setSortBy] = useState<SortMode>('recent');
   const [filterBy, setFilterBy] = useState<FilterMode>('all');
-  const offlineMode = useSettingsStore(s => s.offlineMode);
-  const effectiveFilterBy = offlineMode ? 'offline' : filterBy;
+  const { effectiveOffline } = useEffectiveOfflineState();
+  const einkMode = useSettingsStore((s) => s.einkMode);
+  const effectiveFilterBy = effectiveOffline ? 'offline' : filterBy;
   const offlineRegistry = useOfflineRegistry();
+  const gridColumns = useBookGridColumns();
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const overviewSize = useMeasuredContainerSize(overviewRef);
+  const offlineFallbackBooks = useMemo<Book[]>(() => {
+    return offlineRegistry
+      .filter((item) => item.type === 'book')
+      .flatMap((item) => {
+        const bookId = Number(item.id);
+        if (!Number.isFinite(bookId)) {
+          return [];
+        }
+
+        const timestamp = new Date(item.savedAt).toISOString();
+        return [{
+          id: bookId,
+          user_id: 0,
+          title: item.title,
+          author: item.author || '',
+          publisher: '',
+          language: '',
+          description: '',
+          cover_path: item.coverUrl || '',
+          epub_path: item.cacheKey,
+          file_size: item.sizeBytes,
+          isbn: '',
+          tags: [] as string[],
+          metadata: { offlineOnly: 'true' },
+          created_at: timestamp,
+          updated_at: timestamp,
+        } satisfies Book];
+      });
+  }, [offlineRegistry]);
+  const displayedBooks = effectiveOffline && books.length === 0 ? offlineFallbackBooks : books;
+  const booksPerPage = useResponsiveGridPageSize({
+    columns: gridColumns,
+    aspectRatio: 2 / 3,
+    metaHeight: 74,
+    containerSize: overviewSize,
+    gap: 16,
+    chromeOffset: displayedBooks.length > 0 ? 250 : 220,
+  });
 
   // Fetch books on mount
   useEffect(() => {
@@ -112,10 +184,12 @@ export function BooksView() {
 
   // Sort & filter
   const sortedFilteredBooks = useMemo(() => {
-    let filtered = [...books];
+    let filtered = [...displayedBooks];
 
     // Filter
-    if (effectiveFilterBy === 'unread') {
+    if (effectiveFilterBy === 'unfinished') {
+      filtered = filtered.filter(b => (progressCache[b.id]?.percentage || 0) < 1);
+    } else if (effectiveFilterBy === 'unread') {
       filtered = filtered.filter(b => !progressCache[b.id] || progressCache[b.id].percentage === 0);
     } else if (effectiveFilterBy === 'reading') {
       filtered = filtered.filter(b => {
@@ -140,7 +214,8 @@ export function BooksView() {
     }
 
     return filtered;
-  }, [books, progressCache, sortBy, effectiveFilterBy, offlineRegistry]);
+  }, [displayedBooks, progressCache, sortBy, effectiveFilterBy, offlineRegistry]);
+  const pagedBooks = usePaginatedItems(sortedFilteredBooks, booksPerPage);
 
   // Delete handler with confirmation
   const handleDelete = useCallback(async (book: { id: number; title: string }) => {
@@ -194,9 +269,9 @@ export function BooksView() {
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto content-below-header content-above-navbar">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header content-above-navbar">
           {/* Sort/Filter bar — only shown when there are books */}
-          {books.length > 0 && (
+          {displayedBooks.length > 0 && (
             <FilterBar
               groups={[
                 {
@@ -209,10 +284,11 @@ export function BooksView() {
                   value: sortBy,
                   onChange: setSortBy,
                 },
-                ...(!offlineMode ? [{
+                ...(!effectiveOffline ? [{
                   icon: Filter,
                   options: [
                     { value: 'all' as const, label: 'All' },
+                    { value: 'unfinished' as const, label: 'Unfinished' },
                     { value: 'unread' as const, label: 'Unread' },
                     { value: 'reading' as const, label: 'Reading' },
                     { value: 'finished' as const, label: 'Finished' },
@@ -227,34 +303,66 @@ export function BooksView() {
           )}
 
           {/* Book grid or empty state */}
-          {isLoading && books.length === 0 ? (
+          {isLoading && displayedBooks.length === 0 ? (
             <div className="flex items-center justify-center h-64">
               <div className="w-6 h-6 border-2 border-[var(--color-accent-fg)] border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : books.length === 0 ? (
+          ) : displayedBooks.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-[60vh] text-[var(--color-text-tertiary)] p-8">
-              <Library size={64} className="mb-6 opacity-30" />
+              {effectiveOffline ? (
+                <CloudOff size={64} className="mb-6 opacity-30" />
+              ) : (
+                <Library size={64} className="mb-6 opacity-30" />
+              )}
               <h2 className="text-lg font-medium text-[var(--color-text-primary)] mb-2">
-                Your book library is empty
+                {effectiveOffline ? 'No books saved offline' : 'Your book library is empty'}
               </h2>
               <p className="text-sm text-center max-w-md mb-6">
-                Upload EPUB files or search Z-Library to build your library.
-                Books are stored on the server for reading across devices.
+                {effectiveOffline
+                  ? 'Save books for offline use while online and they will remain available here on cold offline starts.'
+                  : 'Upload EPUB files or search Z-Library to build your library. Books are stored on the server for reading across devices.'}
               </p>
+              {!effectiveOffline && (
               <div className="flex flex-col items-center gap-2 text-xs">
                 <p className="flex items-center gap-1.5">
                   <Upload size={12} />
                   Drag &amp; drop EPUB files or use the header buttons
                 </p>
               </div>
+              )}
             </div>
           ) : (
-            <BookGrid
-              books={sortedFilteredBooks}
-              progressCache={progressCache}
-              onOpenBook={openReader}
-              onDeleteBook={handleDelete}
-            />
+            einkMode ? (
+              <div ref={overviewRef} className="flex-1 min-h-0">
+                <PaginatedOverviewSurface
+                  currentPage={pagedBooks.currentPage}
+                  pageCount={pagedBooks.pageCount}
+                  totalItems={sortedFilteredBooks.length}
+                  rangeStart={pagedBooks.rangeStart}
+                  rangeEnd={pagedBooks.rangeEnd}
+                  onPrevPage={pagedBooks.goToPrevPage}
+                  onNextPage={pagedBooks.goToNextPage}
+                  enabled={!isReaderOpen}
+                >
+                  <BookGrid
+                    books={pagedBooks.pageItems}
+                    progressCache={progressCache}
+                    onOpenBook={openReader}
+                    onDeleteBook={handleDelete}
+                    columns={gridColumns}
+                  />
+                </PaginatedOverviewSurface>
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <BookGrid
+                  books={sortedFilteredBooks}
+                  progressCache={progressCache}
+                  onOpenBook={openReader}
+                  onDeleteBook={handleDelete}
+                />
+              </div>
+            )
           )}
 
           {/* Error state */}

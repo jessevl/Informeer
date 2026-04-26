@@ -40,9 +40,12 @@ import { useMagazinesStore } from '@/stores/magazines';
 import { useBooksStore } from '@/stores/books';
 import { useSettingsStore } from '@/stores/settings';
 import { useModulesStore } from '@/stores/modules';
+import { refreshConnectivityState } from '@/stores/connectivity';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { useIsMobile, useIsTablet } from '@frameer/hooks/useMobileDetection';
 import type { Feed, Category, FeedCounters } from '@/types/api';
+import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import { setNativeShellOfflineMode } from '@/services/native-shell';
 
 const PINNED_FEEDS_STORAGE_KEY = 'informeer-pinned-feeds';
 const RAIL_HOVER_SUPPRESS_MS = 450;
@@ -118,11 +121,10 @@ export function AppSidebar({
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(
     new Set(categories.map(c => c.id))
   );
-
   const audioCategoryId = useSettingsStore(s => s.audioCategoryId);
   const videoCategoryId = useSettingsStore(s => s.videoCategoryId);
   const magazinesCategoryId = useSettingsStore(s => s.magazinesCategoryId);
-  const offlineMode = useSettingsStore(s => s.offlineMode);
+  const { effectiveOffline } = useEffectiveOfflineState();
   const setOfflineMode = useSettingsStore(s => s.setOfflineMode);
   const booksEnabled = useModulesStore(s => s.modules.books);
   const isPdfViewerOpen = useMagazinesStore(s => s.isPdfViewerOpen);
@@ -290,7 +292,7 @@ export function AppSidebar({
         videoCategoryId={videoCategoryId}
         magazinesCategoryId={magazinesCategoryId}
         booksEnabled={booksEnabled}
-        offlineMode={offlineMode}
+        offlineMode={effectiveOffline}
         onSelectView={onSelectView}
         onOpenSettings={onOpenSettings}
         onOpenSearch={onOpenSearch}
@@ -332,7 +334,7 @@ export function AppSidebar({
       onToggleCollapse={onToggleCollapse}
       isRefreshing={isRefreshing}
       currentView={currentView}
-      offlineMode={offlineMode}
+      offlineMode={effectiveOffline}
       setOfflineMode={setOfflineMode}
       magazinesCategoryId={magazinesCategoryId}
       audioCategoryId={audioCategoryId}
@@ -541,9 +543,11 @@ function ExpandedSidebarContent({
       <div className="px-1.5 pb-3 pt-2 flex-shrink-0 border-t border-[var(--color-border-subtle)]">
         <SidebarBottomMenu
           offlineMode={offlineMode}
-          onToggleOffline={() => {
+          onToggleOffline={async () => {
             const newValue = !offlineMode;
             setOfflineMode(newValue);
+            await setNativeShellOfflineMode(newValue).catch(() => null);
+            await refreshConnectivityState().catch(() => null);
             if (newValue) {
               const mt = currentView.mediaType || 'all';
               const isOfflineView = mt === 'audio' || mt === 'magazines' || mt === 'books';

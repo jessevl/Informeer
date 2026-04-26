@@ -425,12 +425,13 @@ function wrapImagesInFigures(doc: Document): void {
  *   figure-float-right → float: right, max-width ~46%
  *   (no class)         → full column width, clear: both
  *
- * WordPress explicit alignment classes (alignleft/alignright) are honoured
- * unconditionally — they always float.
+ * WordPress explicit alignment classes (alignleft/alignright) are treated as
+ * preferred float directions only when adjacent prose is dense enough.
  */
 function classifyFigures(doc: Document): void {
-  const FLOAT_PARA_MIN_LEN = 90; // chars of adjacent text needed to justify a float
-  const TEXT_TAGS = new Set(['P', 'H2', 'H3', 'H4']);
+  const FLOAT_PARA_MIN_LEN = 140; // chars of adjacent prose needed to justify a float
+  const COMBINED_ADJACENT_PROSE_MIN_LEN = 220;
+  const TEXT_TAGS = new Set(['P', 'BLOCKQUOTE', 'LI']);
 
   const figures = Array.from(doc.querySelectorAll('figure'));
   let floatIndex = 0;
@@ -438,15 +439,11 @@ function classifyFigures(doc: Document): void {
   for (const fig of figures) {
     if (!fig.isConnected) continue;
 
-    // WordPress explicit alignment takes priority — always float
-    if (fig.classList.contains('alignleft')) {
-      fig.classList.add('figure-float-left');
-      continue;
-    }
-    if (fig.classList.contains('alignright')) {
-      fig.classList.add('figure-float-right');
-      continue;
-    }
+    const preferredFloatClass = fig.classList.contains('alignleft')
+      ? 'figure-float-left'
+      : fig.classList.contains('alignright')
+        ? 'figure-float-right'
+        : null;
 
     const prev = fig.previousElementSibling;
     const next = fig.nextElementSibling;
@@ -460,7 +457,14 @@ function classifyFigures(doc: Document): void {
     const nextLen = next && TEXT_TAGS.has(next.tagName)
       ? (next.textContent?.trim().length ?? 0) : 0;
 
-    if (prevLen >= FLOAT_PARA_MIN_LEN || nextLen >= FLOAT_PARA_MIN_LEN) {
+    const combinedAdjacentLen = prevLen + nextLen;
+
+    if ((prevLen >= FLOAT_PARA_MIN_LEN || nextLen >= FLOAT_PARA_MIN_LEN)
+      && combinedAdjacentLen >= COMBINED_ADJACENT_PROSE_MIN_LEN) {
+      if (preferredFloatClass) {
+        fig.classList.add(preferredFloatClass);
+        continue;
+      }
       floatIndex++;
       fig.classList.add(floatIndex % 2 === 1 ? 'figure-float-left' : 'figure-float-right');
     }

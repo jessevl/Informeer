@@ -355,9 +355,9 @@ export function ArticleContent({
          essays (NatGeo, etc.) and any article where images outnumber prose.
 
          Floating is opt-in: the sanitizer adds figure-float-left or
-         figure-float-right only when a figure is directly adjacent to a
-         paragraph with substantial text (≥ 90 chars). WordPress explicit
-         alignment classes (alignleft/alignright) always float.
+         figure-float-right only when a figure is directly adjacent to dense
+         prose. Publisher alignment classes act only as direction hints, not
+         as unconditional float instructions.
       ──────────────────────────────────────────────────────────────────── */
 
       .informeer-article-typography figure {
@@ -371,22 +371,22 @@ export function ArticleContent({
       }
 
       /* Inline float — adjacent to substantial paragraph text */
-      .informeer-article-typography figure.figure-float-left,
-      .informeer-article-typography figure.alignleft {
+      .informeer-article-typography figure.figure-float-left {
         float: left;
         clear: none;
         max-width: 46%;
+        shape-outside: margin-box;
         margin-right: 1.4em;
         margin-left: 0;
         margin-top: 0.25em;
         margin-bottom: 1em;
       }
 
-      .informeer-article-typography figure.figure-float-right,
-      .informeer-article-typography figure.alignright {
+      .informeer-article-typography figure.figure-float-right {
         float: right;
         clear: none;
         max-width: 46%;
+        shape-outside: margin-box;
         margin-left: 1.4em;
         margin-right: 0;
         margin-top: 0.25em;
@@ -403,9 +403,21 @@ export function ArticleContent({
 
       .informeer-article-typography figure img {
         width: 100%;
+        max-width: 100%;
         height: auto;
         display: block;
         border-radius: 4px;
+        background: var(--color-surface-secondary);
+      }
+
+      .informeer-article-typography figure > a,
+      .informeer-article-typography figure > picture {
+        display: block;
+      }
+
+      .informeer-article-typography figure.figure-float-left img,
+      .informeer-article-typography figure.figure-float-right img {
+        max-height: min(22rem, 52vh);
       }
 
       .informeer-article-typography figcaption {
@@ -444,10 +456,10 @@ export function ArticleContent({
       ${resolvedColumnCount === 2 && isPaginated ? `
       /* In 2-column paginated mode shrink floats so they fit within a column */
       .informeer-article-typography figure.figure-float-left,
-      .informeer-article-typography figure.figure-float-right,
-      .informeer-article-typography figure.alignleft,
-      .informeer-article-typography figure.alignright {
-        max-width: 42%;
+      .informeer-article-typography figure.figure-float-right {
+        max-width: 40%;
+        margin-left: 1em;
+        margin-right: 1em;
       }
       ` : ''}
 

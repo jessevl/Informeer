@@ -100,6 +100,9 @@ function RootComponent() {
       flushSyncQueue().catch(() => {});
     });
 
+    // Flush once on startup too, in case the app was reopened while already online.
+    flushSyncQueue().catch(() => {});
+
     const cleanupFocus = initFocusRefresh({
       refreshEntries: () => useEntriesStore.getState().fetchEntries(false),
       refreshFeeds: () => useFeedsStore.getState().fetchFeeds(),

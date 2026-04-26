@@ -9,6 +9,8 @@ import { useState, useCallback } from 'react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { BookOpen, MoreHorizontal, Trash2, CloudOff, Check } from 'lucide-react';
 import type { MagazineIssue } from '@/stores/magazines';
+import { useOfflineItem } from '@/stores/offline';
+import { useCachedImageUrl } from '@/hooks/useCachedImageUrl';
 
 interface ReadingProgress {
   maxPage: number;
@@ -36,6 +38,11 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
   const { latestIssue, issues, feedTitle } = group;
   const issueCount = issues.length;
   const [showMenu, setShowMenu] = useState(false);
+  const offlineItem = useOfflineItem('magazine', latestIssue.id);
+  const coverImageUrl = useCachedImageUrl({
+    cacheKey: offlineItem?.coverCacheKey,
+    imageUrl: latestIssue.coverUrl,
+  });
 
   // Calculate aggregate reading progress for the latest issue
   const latestProgress = progressMap[latestIssue.id];
@@ -47,6 +54,8 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
     const p = progressMap[i.id];
     return p && p.maxPage > 0 && p.totalPages > 0 && (p.maxPage / p.totalPages) > 0.9;
   }).length;
+  const isFullyRead = issueCount > 0 && readCount === issueCount;
+  const shouldMuteReadState = !isSelected && (isFullyRead || progressPercent >= 90);
 
   // Extract the latest issue date info from the title
   const issueDateLabel = extractIssueDateLabel(latestIssue.title, feedTitle);
@@ -73,6 +82,7 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
         className={cn(
           'relative cursor-pointer focus:outline-none rounded-lg',
           'transition-all duration-300',
+          shouldMuteReadState && 'opacity-70',
           isSelected
             ? 'ring-2 ring-offset-2 ring-[var(--color-accent-primary)] ring-offset-[var(--color-surface-base)] scale-[1.02]'
             : 'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-[var(--color-surface-base)]'
@@ -112,12 +122,13 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
             'shadow-md hover:shadow-xl',
             'transition-all duration-300 ease-out',
             'group-hover:scale-[1.02] group-hover:-translate-y-1',
+            shouldMuteReadState && '[filter:saturate(0.62)_contrast(0.88)_brightness(1.03)]',
           )}
           style={{ zIndex: 3 }}
         >
-          {latestIssue.coverUrl ? (
+          {coverImageUrl ? (
             <img
-              src={latestIssue.coverUrl}
+              src={coverImageUrl}
               alt={latestIssue.title}
               className="w-full h-full object-cover"
               loading="lazy"
@@ -181,6 +192,15 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
             >
               <Check size={8} />
               {savedCount} saved
+            </div>
+          )}
+          {shouldMuteReadState && (
+            <div
+              className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-secondary)] backdrop-blur-sm"
+              style={{ zIndex: 5 }}
+            >
+              <Check size={10} />
+              Read
             </div>
           )}
         </div>
@@ -247,13 +267,18 @@ export function MagazineStack({ group, onOpen, progressMap = {}, isSelected = fa
             'transition-colors cursor-pointer',
             isSelected
               ? 'text-[var(--color-accent)]'
-              : 'text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)]'
+              : shouldMuteReadState
+                ? 'text-[var(--color-text-secondary)] group-hover:text-[var(--color-accent)]'
+                : 'text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)]'
           )}
           onClick={() => onOpen(group)}
         >
           {feedTitle}
         </h3>
-        <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)]">
+        <div className={cn(
+          'flex items-center gap-1.5 text-xs',
+          shouldMuteReadState ? 'text-[color-mix(in_srgb,var(--color-text-tertiary)_88%,var(--color-surface-base))]' : 'text-[var(--color-text-tertiary)]'
+        )}>
           {issueDateLabel && (
             <span className="truncate">{issueDateLabel}</span>
           )}

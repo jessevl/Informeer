@@ -215,10 +215,56 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const recentOfflineBooksLimit = useSettingsStore(s => s.recentOfflineBooksLimit);
   const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   const offlineRegistry = useOfflineRegistry();
-  const isLandscapeViewport = useIsLandscapeViewport();
+  const isWindowLandscapeViewport = useIsLandscapeViewport();
+  const [viewerViewportSize, setViewerViewportSize] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 0,
+  }));
+
+  useEffect(() => {
+    const updateViewportSize = () => {
+      const node = viewerRef.current ?? wrapperRef.current;
+      if (!node) {
+        setViewerViewportSize({
+          width: window.innerWidth,
+          height: window.innerHeight,
+        });
+        return;
+      }
+
+      setViewerViewportSize({
+        width: node.clientWidth,
+        height: node.clientHeight,
+      });
+    };
+
+    updateViewportSize();
+
+    const node = viewerRef.current ?? wrapperRef.current;
+    const resizeObserver = typeof ResizeObserver !== 'undefined' && node
+      ? new ResizeObserver(() => requestAnimationFrame(updateViewportSize))
+      : null;
+
+    if (node && resizeObserver) {
+      resizeObserver.observe(node);
+    }
+
+    window.addEventListener('resize', updateViewportSize);
+    window.addEventListener('orientationchange', updateViewportSize);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateViewportSize);
+      window.removeEventListener('orientationchange', updateViewportSize);
+    };
+  }, []);
+
+  const isLandscapeViewport = viewerViewportSize.width > 0 && viewerViewportSize.height > 0
+    ? viewerViewportSize.width > viewerViewportSize.height
+    : isWindowLandscapeViewport;
   // Enable spread view in landscape OR when the device is tablet-wide in portrait
   // (width ≥ 600 CSS px covers most eink tablets but excludes phones ~360-430 px)
-  const isSpreadEligible = isLandscapeViewport || window.innerWidth >= 600;
+  const isSpreadEligible = isLandscapeViewport || viewerViewportSize.width >= 600;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(
@@ -542,13 +588,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         writeSessionEpub(sessionCacheKey, bookData);
 
         if (recentOfflineBooksLimit > 0) {
+          const authHeader = api.isAuthenticated() ? api.getAuthHeader() : undefined;
           saveBookOfflineData(
             book.id,
             book.title,
             bookData,
             api.getBookCoverUrl(book.id),
             book.author,
-            { retention: 'recent', maxRecentItems: recentOfflineBooksLimit },
+            { retention: 'recent', maxRecentItems: recentOfflineBooksLimit, coverAuthHeader: authHeader },
           ).catch((err) => {
             console.error('[epub-reader] Recent offline cache failed:', err);
           });
@@ -1008,13 +1055,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     setIsSavingOffline(true);
     try {
       if (currentBookDataRef.current) {
+        const authHeader = api.isAuthenticated() ? api.getAuthHeader() || '' : '';
         await saveBookOfflineData(
           book.id,
           book.title,
           currentBookDataRef.current,
           api.getBookCoverUrl(book.id),
           book.author,
-          { retention: 'manual' },
+          { retention: 'manual', coverAuthHeader: authHeader },
         );
       } else {
         const bookUrl = api.getBookFileUrl(book.id);

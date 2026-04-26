@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { getNativeShellNetworkStatus } from '@/services/native-shell';
 
 interface ConnectivityState {
   isOnline: boolean;
@@ -24,6 +25,50 @@ export function markApiSuccess() {
   useConnectivityStore.setState({ lastApiSuccess: Date.now() });
 }
 
+let reconnectToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function applyConnectivityState(nextOnline: boolean, onOnline?: () => void, showReconnectToast = false) {
+  const previousOnline = useConnectivityStore.getState().isOnline;
+  const shouldShowReconnect = showReconnectToast && nextOnline && !previousOnline;
+
+  useConnectivityStore.setState({
+    isOnline: nextOnline,
+    showReconnected: shouldShowReconnect,
+  });
+
+  if (reconnectToastTimer) {
+    clearTimeout(reconnectToastTimer);
+    reconnectToastTimer = null;
+  }
+
+  if (shouldShowReconnect) {
+    reconnectToastTimer = setTimeout(() => {
+      useConnectivityStore.setState({ showReconnected: false });
+      reconnectToastTimer = null;
+    }, 3000);
+  }
+
+  if (nextOnline && !previousOnline) {
+    onOnline?.();
+  }
+}
+
+export async function refreshConnectivityState(onOnline?: () => void, showReconnectToast = false) {
+  let nextOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+  try {
+    const nativeStatus = await getNativeShellNetworkStatus();
+    if (nativeStatus) {
+      nextOnline = nativeStatus.connected;
+    }
+  } catch {
+    // Fall back to navigator.onLine when the native bridge is unavailable.
+  }
+
+  applyConnectivityState(nextOnline, onOnline, showReconnectToast);
+  return nextOnline;
+}
+
 let cleanupFn: (() => void) | null = null;
 
 /**
@@ -33,25 +78,39 @@ let cleanupFn: (() => void) | null = null;
 export function initConnectivity(onOnline?: () => void) {
   if (cleanupFn) return cleanupFn; // already initialised
 
-  const set = useConnectivityStore.setState;
-
-  const goOnline = () => {
-    set({ isOnline: true, showReconnected: true });
-    // Auto-hide "Back online" after 3 seconds
-    setTimeout(() => set({ showReconnected: false }), 3000);
-    onOnline?.();
+  const syncConnectivity = (showReconnectToast = false) => {
+    void refreshConnectivityState(onOnline, showReconnectToast);
   };
 
-  const goOffline = () => {
-    set({ isOnline: false, showReconnected: false });
+  const handleOnline = () => syncConnectivity(true);
+  const handleOffline = () => syncConnectivity(false);
+  const handleFocus = () => syncConnectivity(true);
+  const handlePageShow = () => syncConnectivity(true);
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      syncConnectivity(true);
+    }
   };
 
-  window.addEventListener('online', goOnline);
-  window.addEventListener('offline', goOffline);
+  syncConnectivity(false);
+
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
+  window.addEventListener('focus', handleFocus);
+  window.addEventListener('pageshow', handlePageShow);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 
   cleanupFn = () => {
-    window.removeEventListener('online', goOnline);
-    window.removeEventListener('offline', goOffline);
+    if (reconnectToastTimer) {
+      clearTimeout(reconnectToastTimer);
+      reconnectToastTimer = null;
+    }
+    window.removeEventListener('online', handleOnline);
+    window.removeEventListener('offline', handleOffline);
+    window.removeEventListener('focus', handleFocus);
+    window.removeEventListener('pageshow', handlePageShow);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     cleanupFn = null;
   };
 

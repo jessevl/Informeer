@@ -11,53 +11,26 @@ import { api } from '@/api/client';
 import { useBooksStore } from '@/stores/books';
 import type { Book as BookType } from '@/types/api';
 import { saveBookOffline, removeOfflineItem } from '@/lib/offline/blob-cache';
-import { useIsOffline } from '@/stores/offline';
-
-/** Fetch an image with auth headers and return a blob URL */
-function useAuthenticatedImage(url: string): string | null {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let revoke: string | null = null;
-    let cancelled = false;
-
-    const headers: Record<string, string> = {};
-    if (api.isAuthenticated()) {
-      headers['Authorization'] = api.getAuthHeader();
-    }
-
-    fetch(url, { headers, cache: 'no-cache' })
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((blob) => {
-        if (blob && !cancelled) {
-          revoke = URL.createObjectURL(blob);
-          setBlobUrl(revoke);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
-    };
-  }, [url]);
-
-  return blobUrl;
-}
+import { useOfflineItem } from '@/stores/offline';
+import { useCachedImageUrl } from '@/hooks/useCachedImageUrl';
 
 interface BookGridProps {
   books: BookType[];
   progressCache: Record<number, { percentage: number }>;
   onOpenBook: (book: BookType) => void;
   onDeleteBook: (book: BookType) => void;
+  columns?: number;
 }
 
-export function BookGrid({ books, progressCache, onOpenBook, onDeleteBook }: BookGridProps) {
+export function BookGrid({ books, progressCache, onOpenBook, onDeleteBook, columns }: BookGridProps) {
   return (
-    <div className={cn(
-      'grid gap-4 p-6',
-      'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
-    )}>
+    <div
+      className={cn(
+        'grid gap-4 p-6',
+        !columns && 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
+      )}
+      style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
+    >
       {books.map(book => (
         <BookCard
           key={book.id}
@@ -91,14 +64,20 @@ function BookCard({
   const titleInputRef = useRef<HTMLInputElement>(null);
   const updateBook = useBooksStore(s => s.updateBook);
   const markFinished = useBooksStore(s => s.markFinished);
+  const hasLibraryRecord = book.user_id > 0;
 
   // Offline state
-  const isSavedOffline = useIsOffline('book', String(book.id));
+  const offlineItem = useOfflineItem('book', String(book.id));
+  const isSavedOffline = offlineItem != null;
   const [isSavingOffline, setIsSavingOffline] = useState(false);
 
   // Always try to load the cover — the API returns 404 if missing, which triggers onError fallback
-  const coverUrl = api.getBookCoverUrl(book.id);
-  const coverBlobUrl = useAuthenticatedImage(coverUrl);
+  const coverUrl = hasLibraryRecord ? api.getBookCoverUrl(book.id) : (offlineItem?.coverUrl || book.cover_path || '');
+  const coverBlobUrl = useCachedImageUrl({
+    cacheKey: offlineItem?.coverCacheKey,
+    imageUrl: coverUrl,
+    authenticated: hasLibraryRecord,
+  });
 
   // Focus title input when entering edit mode
   useEffect(() => {
@@ -272,37 +251,41 @@ function BookCard({
             'bg-[var(--color-surface-primary)] border border-[var(--color-border-default)]',
             'rounded-lg shadow-lg py-1'
           )}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleStartEdit();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
-              <Pencil size={14} />
-              Edit
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                onDelete();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
-              <Trash2 size={14} />
-              Delete
-            </button>
-            {progress < 1 && (
+            {hasLibraryRecord && (
               <>
-                <div className="h-px bg-[var(--color-border-default)] mx-2" />
                 <button
-                  onClick={handleMarkFinished}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStartEdit();
+                  }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
                 >
-                  <Check size={14} className="text-emerald-500" />
-                  Mark finished
+                  <Pencil size={14} />
+                  Edit
                 </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onDelete();
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Trash2 size={14} />
+                  Delete
+                </button>
+                {progress < 1 && (
+                  <>
+                    <div className="h-px bg-[var(--color-border-default)] mx-2" />
+                    <button
+                      onClick={handleMarkFinished}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                    >
+                      <Check size={14} className="text-emerald-500" />
+                      Mark finished
+                    </button>
+                  </>
+                )}
               </>
             )}
             <div className="h-px bg-[var(--color-border-default)] mx-2" />

@@ -4,6 +4,12 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.wifi.WifiManager;
+import android.os.Build;
+import android.provider.Settings;
 
 import androidx.annotation.Nullable;
 
@@ -69,8 +75,95 @@ public class NativeShellPlugin extends Plugin {
 		relaunchApplication();
 	}
 
+	@PluginMethod
+	public void getNetworkStatus(PluginCall call) {
+		call.resolve(buildNetworkStatus());
+	}
+
+	@PluginMethod
+	public void setOfflineMode(PluginCall call) {
+		Boolean enabled = call.getBoolean("enabled");
+		if (enabled == null) {
+			call.reject("Missing enabled flag.");
+			return;
+		}
+
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+			WifiManager wifiManager = getWifiManager();
+			if (wifiManager == null) {
+				JSObject unavailable = buildNetworkStatus();
+				unavailable.put("requestedOffline", enabled);
+				unavailable.put("applied", false);
+				unavailable.put("changed", false);
+				unavailable.put("requiresUserAction", true);
+				call.resolve(unavailable);
+				return;
+			}
+
+			boolean targetWifiEnabled = !enabled;
+			boolean changed = wifiManager.isWifiEnabled() != targetWifiEnabled;
+			boolean success = wifiManager.setWifiEnabled(targetWifiEnabled);
+
+			JSObject response = buildNetworkStatus();
+			response.put("requestedOffline", enabled);
+			response.put("applied", success);
+			response.put("changed", changed && success);
+			response.put("requiresUserAction", !success);
+			call.resolve(response);
+			return;
+		}
+
+		openConnectivityPanel();
+		JSObject response = buildNetworkStatus();
+		response.put("requestedOffline", enabled);
+		response.put("applied", false);
+		response.put("changed", false);
+		response.put("requiresUserAction", true);
+		response.put("openedSystemPanel", true);
+		call.resolve(response);
+	}
+
 	private SharedPreferences getPrefs() {
 		return getContext().getSharedPreferences(PREFS_NAME, Activity.MODE_PRIVATE);
+	}
+
+	@Nullable
+	private WifiManager getWifiManager() {
+		return (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+	}
+
+	private JSObject buildNetworkStatus() {
+		JSObject response = new JSObject();
+		response.put("canToggleProgrammatically", Build.VERSION.SDK_INT < Build.VERSION_CODES.Q);
+
+		WifiManager wifiManager = getWifiManager();
+		response.put("wifiEnabled", wifiManager != null && wifiManager.isWifiEnabled());
+
+		ConnectivityManager connectivityManager = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+		Network activeNetwork = connectivityManager != null ? connectivityManager.getActiveNetwork() : null;
+		NetworkCapabilities capabilities = connectivityManager != null && activeNetwork != null
+			? connectivityManager.getNetworkCapabilities(activeNetwork)
+			: null;
+
+		boolean connected = capabilities != null
+			&& capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+		boolean wifiConnected = capabilities != null
+			&& capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+
+		response.put("connected", connected);
+		response.put("wifiConnected", wifiConnected);
+		return response;
+	}
+
+	private void openConnectivityPanel() {
+		Intent intent;
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+			intent = new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY);
+		} else {
+			intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
+		}
+		intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+		getContext().startActivity(intent);
 	}
 
 	private void relaunchApplication() {
