@@ -145,11 +145,15 @@ export function PDFViewer({
   const [isPortraitViewport, setIsPortraitViewport] = useState(false);
 
   // Auto-hide toolbar
-  const [showControls, setShowControls] = useState(true);
+  const [showControls, setShowControls] = useState(() => !useSettingsStore.getState().einkMode);
   const [controlsTick, setControlsTick] = useState(0);
 
   const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   useAutoHideControls(showControls, setShowControls, isLoading, readerToolbarHideDelay * 1000);
+
+  useEffect(() => {
+    setShowControls(!useSettingsStore.getState().einkMode);
+  }, [entryId, pdfUrl]);
 
   // Ad detection state
   const [adPages, setAdPagesState] = useState<Set<number>>(new Set());

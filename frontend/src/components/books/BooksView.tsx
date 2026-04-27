@@ -17,12 +17,7 @@ import { ZLibSearch } from './ZLibSearch';
 import { useOfflineRegistry } from '@/stores/offline';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
-import {
-  PaginatedOverviewSurface,
-  useMeasuredContainerSize,
-  usePaginatedItems,
-  useResponsiveGridPageSize,
-} from '@/components/overview/PaginatedOverview';
+
 import type { Book } from '@/types/api';
 
 function getBookGridColumns(width: number): number {
@@ -132,12 +127,10 @@ export function BooksView() {
   const [sortBy, setSortBy] = useState<SortMode>('recent');
   const [filterBy, setFilterBy] = useState<FilterMode>('all');
   const { effectiveOffline } = useEffectiveOfflineState();
-  const einkMode = useSettingsStore((s) => s.einkMode);
   const effectiveFilterBy = effectiveOffline ? 'offline' : filterBy;
   const offlineRegistry = useOfflineRegistry();
   const gridColumns = useBookGridColumns();
   const overviewRef = useRef<HTMLDivElement>(null);
-  const overviewSize = useMeasuredContainerSize(overviewRef);
   const offlineFallbackBooks = useMemo<Book[]>(() => {
     return offlineRegistry
       .filter((item) => item.type === 'book')
@@ -168,14 +161,7 @@ export function BooksView() {
       });
   }, [offlineRegistry]);
   const displayedBooks = effectiveOffline && books.length === 0 ? offlineFallbackBooks : books;
-  const booksPerPage = useResponsiveGridPageSize({
-    columns: gridColumns,
-    aspectRatio: 2 / 3,
-    metaHeight: 74,
-    containerSize: overviewSize,
-    gap: 16,
-    chromeOffset: displayedBooks.length > 0 ? 250 : 220,
-  });
+
 
   // Fetch books on mount
   useEffect(() => {
@@ -215,8 +201,6 @@ export function BooksView() {
 
     return filtered;
   }, [displayedBooks, progressCache, sortBy, effectiveFilterBy, offlineRegistry]);
-  const pagedBooks = usePaginatedItems(sortedFilteredBooks, booksPerPage);
-
   // Delete handler with confirmation
   const handleDelete = useCallback(async (book: { id: number; title: string }) => {
     if (!confirm(`Delete "${book.title}"?`)) return;
@@ -332,37 +316,14 @@ export function BooksView() {
               )}
             </div>
           ) : (
-            einkMode ? (
-              <div ref={overviewRef} className="flex-1 min-h-0">
-                <PaginatedOverviewSurface
-                  currentPage={pagedBooks.currentPage}
-                  pageCount={pagedBooks.pageCount}
-                  totalItems={sortedFilteredBooks.length}
-                  rangeStart={pagedBooks.rangeStart}
-                  rangeEnd={pagedBooks.rangeEnd}
-                  onPrevPage={pagedBooks.goToPrevPage}
-                  onNextPage={pagedBooks.goToNextPage}
-                  enabled={!isReaderOpen}
-                >
-                  <BookGrid
-                    books={pagedBooks.pageItems}
-                    progressCache={progressCache}
-                    onOpenBook={openReader}
-                    onDeleteBook={handleDelete}
-                    columns={gridColumns}
-                  />
-                </PaginatedOverviewSurface>
-              </div>
-            ) : (
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                <BookGrid
-                  books={sortedFilteredBooks}
-                  progressCache={progressCache}
-                  onOpenBook={openReader}
-                  onDeleteBook={handleDelete}
-                />
-              </div>
-            )
+            <div ref={overviewRef} className="flex-1 min-h-0 overflow-y-auto">
+              <BookGrid
+                books={sortedFilteredBooks}
+                progressCache={progressCache}
+                onOpenBook={openReader}
+                onDeleteBook={handleDelete}
+              />
+            </div>
           )}
 
           {/* Error state */}

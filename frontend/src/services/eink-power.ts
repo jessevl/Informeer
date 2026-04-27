@@ -303,6 +303,7 @@ class EinkPowerController {
   }
 
   setSurface(surface: Partial<SurfaceState> & Pick<SurfaceState, 'mode'>): void {
+    const previousMode = this.surface.mode;
     const wasEligible = this.getSnapshot().eligible;
     this.surface = {
       ...this.surface,
@@ -316,7 +317,7 @@ class EinkPowerController {
     // we DON'T reset visualStable/interactiveReady manually here, so that 
     // the call to markVisualStable() below can actually move us to ready.
     const isNowEligible = this.getSnapshot().eligible;
-    if (surface.mode !== this.surface.mode || !isNowEligible) {
+    if (surface.mode !== previousMode || !isNowEligible) {
       this.visualStable = false;
       this.interactiveReady = false;
     }
@@ -325,8 +326,18 @@ class EinkPowerController {
       // If we just became eligible (e.g. toolbar hidden), ensure we commit a frame
       // so the last visual state of the reader is what gets frozen in hibernate.
       if (!wasEligible && isNowEligible) {
-        void this.markVisualStable();
-        void this.notifyInteractiveReady();
+        void (async () => {
+          await this.waitForPaintCommit();
+
+          const latestSnapshot = this.getSnapshot();
+          if (!latestSnapshot.eligible) return;
+
+          await this.markVisualStable();
+
+          if (!this.getSnapshot().eligible) return;
+
+          await this.notifyInteractiveReady();
+        })();
       }
     });
   }
@@ -362,7 +373,9 @@ class EinkPowerController {
     if (!this.einkEnabled || !this.isHardwareSupported() || typeof window === 'undefined') return;
 
     await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
     });
   }
 

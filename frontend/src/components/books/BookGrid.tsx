@@ -13,6 +13,7 @@ import type { Book as BookType } from '@/types/api';
 import { saveBookOffline, removeOfflineItem } from '@/lib/offline/blob-cache';
 import { useOfflineItem } from '@/stores/offline';
 import { useCachedImageUrl } from '@/hooks/useCachedImageUrl';
+import { useLongPress } from '@frameer/hooks';
 
 interface BookGridProps {
   books: BookType[];
@@ -168,6 +169,16 @@ function BookCard({
     }
   };
 
+  const { longPressHandlers } = useLongPress({
+    enabled: !isEditing,
+    onLongPress: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setShowMenu(true);
+    },
+    duration: 450,
+  });
+
   return (
     <div className="group relative flex flex-col">
       {/* Cover */}
@@ -180,6 +191,11 @@ function BookCard({
           !isEditing && 'hover:scale-[1.02] active:scale-[0.98]',
           'focus-visible:ring-2 focus-visible:ring-[var(--color-interactive-ring)] outline-none'
         )}
+        onTouchStart={longPressHandlers.onTouchStart}
+        onTouchMove={longPressHandlers.onTouchMove}
+        onTouchEnd={longPressHandlers.onTouchEnd}
+        onTouchCancel={longPressHandlers.onTouchCancel}
+        onContextMenu={longPressHandlers.onContextMenu}
       >
         {coverBlobUrl && !imageError ? (
           <img

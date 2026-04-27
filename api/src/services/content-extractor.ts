@@ -96,7 +96,6 @@ const PREDEFINED_RULES: Record<string, string> = {
   'volkskrant.nl':        'article .article__body',
   'nrc.nl':               '.article__content',
   'trouw.nl':             'article .article__body',
-  'nytimes.com':          'section[name="articleBody"], .article-body, .StoryBodyCompact, section[data-testid="body-interior"]',
   'nationalgeographic.com': '[data-testid="prism-article-body"]',
   'nationalgeographic.org': '[data-testid="prism-article-body"]',
 };
@@ -152,12 +151,9 @@ const REMOVE_SELECTORS = [
   '[class*="shareaholic"]',                           // Shareaholic
   '[class*="share-this"]', '[class*="sharethis"]',   // ShareThis
   '[class*="social-sharing"]', '[class*="post-sharing"]', '[class*="entry-share"]',
-  // NYT paywall overlay elements (the extension blocks JS calls that activate these;
-  // we strip them from the DOM so Readability doesn't pick up the overlay text)
   '#gateway-content', '#standalone-footer',
   '[data-testid="meter-paywall"]', '[data-testid="paywall"]',
   '[data-testid="RegGate"]', '[data-testid="gateway"]',
-  '.css-1bd8bfl', // NYT subscription banner class (changes but worth trying)
   '[class*="Paywall"]', '[class*="paywall"]',
   '[class*="Gateway"]', '[class*="gateway"]',
   // Wired (Condé Nast) – article header contains duplicate title/byline/hero image,
@@ -174,7 +170,6 @@ const REMOVE_SELECTORS = [
   'dmt-util-bar',
   'dmt-share-widget',
   'dmt-inline-article-widget',
-  // NYT – accessibility label span inside lazy-image wrappers (renders as literal "Image" text)
   '[data-testid="photoviewer-children-figure"] > span',
   // NatGeo – expand-image buttons and related chrome inside article figures
   '[data-testid="prism-ImageViewer_ExpandButton"]',
@@ -204,7 +199,7 @@ function preProcessHtml(html: string): string {
   clean = clean.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   clean = clean.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   // Before stripping <noscript> elements, extract any <img> tags they contain.
-  // Many sites (NYT, WaPo, etc.) use <noscript> as a no-JS fallback for lazy-loaded
+  // Many sites use <noscript> as a no-JS fallback for lazy-loaded
   // images — the actual src lives there while JS renders into an empty sibling div.
   clean = clean.replace(/<noscript\b[^>]*>([\s\S]*?)<\/noscript>/gi, (_match: string, inner: string) => {
     const imgs: string[] = [];
@@ -395,7 +390,7 @@ function wrapImagesInFigures(html: string): string {
     }
 
     const parent: any = (img as any).parentElement;
-    // Walk up the tree — NYT and others nest <img> several divs inside <figure>
+    // Walk up the tree — publishers often nest <img> several divs inside <figure>
     let ancestorFigure: any = parent;
     while (ancestorFigure && ancestorFigure.tagName?.toLowerCase() !== 'figure') {
       ancestorFigure = ancestorFigure.parentElement;
@@ -663,6 +658,26 @@ async function readResponseBody(response: Response): Promise<string> {
  */
 
 /**
+ * Detect bot-challenge / captcha pages served by anti-bot services.
+ * These are returned as 200 OK but contain no article content.
+ * Known services: DataDome, Cloudflare Challenge, PerimeterX, Akamai.
+ */
+function isBotChallengePage(html: string): boolean {
+  if (html.length > 50_000) return false; // real pages are much larger
+  return (
+    html.includes('captcha-delivery.com') ||
+    html.includes('datadome.co') ||
+    html.includes('geo.captcha-delivery.com') ||
+    html.includes('perimeterx.net') ||
+    html.includes('px-captcha') ||
+    // Cloudflare JS challenge / IUAM page
+    (html.includes('cf-browser-verification') || html.includes('_cf_chl_opt')) ||
+    // Generic "enable JS" bot block
+    (html.length < 2_000 && /please enable (javascript|js)|enable js and disable/i.test(html))
+  );
+}
+
+/**
  * Resolve subscriber session cookies for known paywall sites.
  * Returns null if credentials are not configured or if the site is unknown.
  */
@@ -727,13 +742,8 @@ async function fetchPage(url: string, opts?: FeedExtractOptions): Promise<{ html
     }
   }
 
-  // For NYT: use a Google search referrer to bypass metered paywall.
-  // NYT's paywall JS checks the referrer — arriving "from Google" skips enforcement.
-  const isNytUnlock = !opts?.cookie &&
-    (hostname === 'nytimes.com' || hostname.endsWith('.nytimes.com'));
   const refererDomain = Object.keys(SITE_REFERERS).find(d => hostname.includes(d));
-  const resolvedReferer = isNytUnlock ? 'https://www.google.com/' :
-    (refererDomain ? SITE_REFERERS[refererDomain] : undefined);
+  const resolvedReferer = refererDomain ? SITE_REFERERS[refererDomain] : undefined;
 
   const headers = htmlFetchHeaders({
     userAgent: opts?.userAgent,
@@ -752,9 +762,13 @@ async function fetchPage(url: string, opts?: FeedExtractOptions): Promise<{ html
       timeoutMs: 20_000,
     });
 
-    // 2xx — success, return page content
+    // 2xx — success, but may be a bot-challenge page (DataDome etc.)
     if (response.ok) {
-      return { html: await readResponseBody(response), finalUrl: currentUrl };
+      const html = await readResponseBody(response);
+      if (isBotChallengePage(html)) {
+        throw new Error(`Bot challenge page returned by ${hostname} — cannot extract content`);
+      }
+      return { html, finalUrl: currentUrl };
     }
 
     // 3xx — redirect
@@ -810,7 +824,7 @@ async function fetchPage(url: string, opts?: FeedExtractOptions): Promise<{ html
       continue;
     }
 
-    // Non-2xx, non-3xx — drain and error
+    // Non-2xx, non-3xx
     await drainBody(response);
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }

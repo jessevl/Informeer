@@ -25,7 +25,7 @@ function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <img src="/icons/app-icon-small.svg" alt="Informeer" className="w-32 h-32 mb-6" />
+          <img src="/icons/app-icon-small.svg" alt="Informeer" className="block w-32 h-32 mb-6 mx-auto" />
           <h1 className="text-2xl font-semibold text-[var(--color-text-primary)]">
             Informeer
           </h1>

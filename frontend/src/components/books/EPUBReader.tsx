@@ -78,6 +78,20 @@ function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
 }
 
+const EPUB_MIN_SPREAD_WIDTH_PX = 600;
+const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
+const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
+const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
+
+function getEpubVerticalPaddingCss(
+  baseMarginPx: number,
+  inset: 'top' | 'bottom',
+  overlayClearancePx: number,
+) {
+  const safeAreaInset = `env(safe-area-inset-${inset}, 0px)`;
+  return `max(${baseMarginPx + overlayClearancePx}px, calc(${safeAreaInset} + ${overlayClearancePx}px))`;
+}
+
 const SESSION_EPUB_CACHE_LIMIT = 4;
 const RECONNECT_GRACE_MS = 2500;
 const sessionEpubCache = new Map<string, Uint8Array>();
@@ -195,7 +209,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapter, setChapter] = useState(initialProgress.chapter);
   const [percentage, setPercentage] = useState(initialProgress.percentage);
-  const [showControls, setShowControls] = useState(true);
+  const [showControls, setShowControls] = useState(() => !useSettingsStore.getState().einkMode);
   const showControlsRef = useRef(showControls);
   useEffect(() => { showControlsRef.current = showControls; }, [showControls]);
 
@@ -264,7 +278,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     : isWindowLandscapeViewport;
   // Enable spread view in landscape OR when the device is tablet-wide in portrait
   // (width ≥ 600 CSS px covers most eink tablets but excludes phones ~360-430 px)
-  const isSpreadEligible = isLandscapeViewport || viewerViewportSize.width >= 600;
+  const isSpreadEligible = isLandscapeViewport || viewerViewportSize.width >= EPUB_MIN_SPREAD_WIDTH_PX;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(
@@ -286,6 +300,12 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // --- Typography ---
   const [showTypography, setShowTypography] = useState(false);
   const [typography, setTypography] = useState<TypographySettings>(loadTypographySettings);
+
+  useEffect(() => {
+    setShowControls(!useSettingsStore.getState().einkMode);
+    setShowToc(false);
+    setShowTypography(false);
+  }, [book.id]);
 
   // --- Auto-hide toolbar ---
   const [controlsTick, setControlsTick] = useState(0);
@@ -403,12 +423,42 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const [scale, setScale] = useState(1);
 
   // --- Navigation state for shared hooks ---
-  const canGoNext = percentage < 1;
-  const canGoPrev = percentage > 0;
+  const canGoNext = totalPagesOverall > 0
+    ? currentPageOverall + 1 < totalPagesOverall
+    : percentage < 1;
+  const canGoPrev = totalPagesOverall > 0
+    ? currentPageOverall > 0
+    : percentage > 0;
 
   // === Shared Hooks ===
 
   const { animatePageTurn, getPageStyle } = useReaderAnimation({ disabled: einkMode });
+
+  const runRenditionPageTurn = useCallback(
+    (attemptRef: { current: boolean }, action: (() => Promise<unknown>) | null) => {
+      if (!action || attemptRef.current) return false;
+
+      attemptRef.current = true;
+      let cleared = false;
+      const clearAttempt = () => {
+        if (cleared) return;
+        cleared = true;
+        attemptRef.current = false;
+      };
+
+      const resetTimer = window.setTimeout(clearAttempt, EPUB_PAGE_TURN_GUARD_RESET_MS);
+      void Promise.resolve()
+        .then(action)
+        .catch(() => {})
+        .finally(() => {
+          window.clearTimeout(resetTimer);
+          clearAttempt();
+        });
+
+      return true;
+    },
+    [],
+  );
 
   // Navigation callbacks with animation guard to prevent double-fire
   const nextPage = useCallback(() => {
@@ -419,12 +469,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-left', () => {
-      renditionRef.current?.next().finally(() => {
-        nextAttemptInProgressRef.current = false;
-      });
+      const rendition = renditionRef.current;
+      if (!runRenditionPageTurn(nextAttemptInProgressRef, rendition ? () => rendition.next() : null)) {
+        isAnimatingRef.current = false;
+        return;
+      }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoNext, animatePageTurn, startEinkWork]);
+  }, [canGoNext, animatePageTurn, runRenditionPageTurn, startEinkWork]);
 
   const prevPage = useCallback(() => {
     if (!renditionRef.current || !canGoPrev || isAnimatingRef.current) return;
@@ -434,35 +486,41 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-right', () => {
-      renditionRef.current?.prev().finally(() => {
-        prevAttemptInProgressRef.current = false;
-      });
+      const rendition = renditionRef.current;
+      if (!runRenditionPageTurn(prevAttemptInProgressRef, rendition ? () => rendition.prev() : null)) {
+        isAnimatingRef.current = false;
+        return;
+      }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoPrev, animatePageTurn, startEinkWork]);
+  }, [canGoPrev, animatePageTurn, runRenditionPageTurn, startEinkWork]);
 
   // Instant variants for keyboard/hardware-button navigation — no animation delay.
   // Keyboard nav never has a visible slide (the user pressed a key, not swiped),
   // so waiting 200ms for the exit animation before calling next()/prev() is pure delay.
   const nextPageInstant = useCallback(() => {
-    if (!renditionRef.current || !canGoNext || nextAttemptInProgressRef.current) return;
-    nextAttemptInProgressRef.current = true;
+    const rendition = renditionRef.current;
+    if (!rendition || !canGoNext || nextAttemptInProgressRef.current) return;
     startEinkWork('page-turn');
-    renditionRef.current.next().finally(() => { nextAttemptInProgressRef.current = false; });
-  }, [canGoNext, startEinkWork]);
+    runRenditionPageTurn(nextAttemptInProgressRef, () => rendition.next());
+  }, [canGoNext, runRenditionPageTurn, startEinkWork]);
 
   const prevPageInstant = useCallback(() => {
-    if (!renditionRef.current || !canGoPrev || prevAttemptInProgressRef.current) return;
-    prevAttemptInProgressRef.current = true;
+    const rendition = renditionRef.current;
+    if (!rendition || !canGoPrev || prevAttemptInProgressRef.current) return;
     startEinkWork('page-turn');
-    renditionRef.current.prev().finally(() => { prevAttemptInProgressRef.current = false; });
-  }, [canGoPrev, startEinkWork]);
+    runRenditionPageTurn(prevAttemptInProgressRef, () => rendition.prev());
+  }, [canGoPrev, runRenditionPageTurn, startEinkWork]);
 
   // Refs to keep callbacks fresh for iframe event handlers
   const nextPageRef = useRef(nextPage);
   nextPageRef.current = nextPage;
   const prevPageRef = useRef(prevPage);
   prevPageRef.current = prevPage;
+  const nextPageInstantRef = useRef(nextPageInstant);
+  nextPageInstantRef.current = nextPageInstant;
+  const prevPageInstantRef = useRef(prevPageInstant);
+  prevPageInstantRef.current = prevPageInstant;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const readerThemeRef = useRef(readerTheme);
@@ -620,12 +678,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
         // Determine initial spread based on viewport
         const viewerEl = viewerRef.current!;
-        const isLandscape = viewerEl.clientWidth > viewerEl.clientHeight;
 
         const rendition = epub.renderTo(viewerEl, {
           width: '100%',
           height: '100%',
-          spread: (manualSpreadPreferenceRef.current ? isSpreadView : isLandscape) ? 'auto' : 'none',
+          spread: (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible) ? 'auto' : 'none',
           flow: 'paginated',
           allowScriptedContent: true,
         } as any);
@@ -869,37 +926,47 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             else toggleControlsRef.current();
           }, true);
 
-          // Direct keydown handler on iframe document. Forwards keyboard
-          // events to the parent window so useReaderKeyboard can pick
-          // them up (iframe events don't propagate to the parent).
-          // Runs in capture phase so it fires before any epub.js handlers.
+          // Handle navigation keys directly inside the iframe so hardware
+          // buttons do not depend on synthetic KeyboardEvent keyCode support.
           doc.addEventListener('keydown', (e: KeyboardEvent) => {
-            // Forward all key properties, including the legacy keyCode/which
-            // fields that some E-ink hardware buttons only populate.
+            const isPrevPageKey = e.key === 'ArrowLeft'
+              || e.key === 'ArrowUp'
+              || e.key === 'PageUp';
+            const isNextPageKey = e.key === 'ArrowRight'
+              || e.key === 'ArrowDown'
+              || e.key === 'PageDown'
+              || e.key === ' ';
+            const isPrevVolumeKey = e.key === 'AudioVolumeDown'
+              || e.code === 'VolumeDown'
+              || e.keyCode === 25
+              || e.keyCode === 174;
+            const isNextVolumeKey = e.key === 'AudioVolumeUp'
+              || e.code === 'VolumeUp'
+              || e.keyCode === 24
+              || e.keyCode === 175;
+            const isCloseKey = e.key === 'Escape';
+
+            if (isPrevPageKey || isNextPageKey || isPrevVolumeKey || isNextVolumeKey || isCloseKey) {
+              e.preventDefault();
+              e.stopPropagation();
+
+              if (isPrevPageKey || isPrevVolumeKey) {
+                prevPageInstantRef.current();
+              } else if (isNextPageKey || isNextVolumeKey) {
+                nextPageInstantRef.current();
+              } else {
+                onCloseRef.current();
+              }
+
+              return;
+            }
+
             window.dispatchEvent(new KeyboardEvent('keydown', {
               key: e.key,
               code: e.code,
-              keyCode: e.keyCode,
-              which: e.which,
               bubbles: true,
               cancelable: true,
             }));
-
-            // Prevent default browser behavior (e.g. arrow-key scrolling) and
-            // stop other iframe handlers (epub.js) from seeing navigation keys.
-            // This avoids spurious layout/scroll work before the page turn fires.
-            const isNavKey = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
-              || e.key === 'ArrowUp' || e.key === 'ArrowDown'
-              || e.key === 'PageUp' || e.key === 'PageDown'
-              || e.key === ' '
-              || e.key === 'AudioVolumeDown' || e.key === 'AudioVolumeUp'
-              || e.code === 'VolumeDown' || e.code === 'VolumeUp'
-              || e.keyCode === 24 || e.keyCode === 25
-              || e.keyCode === 174 || e.keyCode === 175;
-            if (isNavKey) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
           }, true);
         });
 
@@ -1426,17 +1493,9 @@ function applyThemeAndTypography(
   const lineHeight = isOriginal ? undefined : String(typo.lineHeight);
   const textAlign = isOriginal || typo.textAlign === 'original' ? undefined : typo.textAlign;
   const hyphens = isOriginal ? undefined : typo.hyphenation ? 'auto' : 'manual';
-  const vMargin = typo.verticalMargin ?? 0;
-
-  // Build safe-area-aware padding for top/bottom to avoid content under
-  // the notch / Dynamic Island in PWA mode
-  const safeVMargin = vMargin > 0
-    ? `max(${vMargin}px, env(safe-area-inset-top, 0px))` 
-    : undefined;
-  const safePaddingTop = safeVMargin ?? 'env(safe-area-inset-top, 0px)';
-  const safePaddingBottom = vMargin > 0
-    ? `max(${vMargin}px, env(safe-area-inset-bottom, 0px))`
-    : 'env(safe-area-inset-bottom, 0px)';
+  const vMargin = isOriginal ? 0 : typo.verticalMargin ?? 0;
+  const safePaddingTop = getEpubVerticalPaddingCss(vMargin, 'top', EPUB_CONTENT_TOP_CLEARANCE_PX);
+  const safePaddingBottom = getEpubVerticalPaddingCss(vMargin, 'bottom', EPUB_CONTENT_BOTTOM_CLEARANCE_PX);
   const sideMargin = isOriginal ? undefined : `${typo.margin}px`;
 
   const bodyStyle: Record<string, string> = {};
@@ -1444,15 +1503,14 @@ function applyThemeAndTypography(
   if (lineHeight) bodyStyle['line-height'] = `${lineHeight} !important`;
   if (textAlign) bodyStyle['text-align'] = `${textAlign} !important`;
   if (hyphens) bodyStyle['hyphens'] = `${hyphens} !important`;
-  // Use individual padding properties so safe-area calc works
-  if (!isOriginal) {
-    bodyStyle['box-sizing'] = 'border-box !important';
-    bodyStyle['padding-top'] = `${safePaddingTop} !important`;
-    bodyStyle['padding-bottom'] = `${safePaddingBottom} !important`;
-    if (sideMargin) {
-      bodyStyle['padding-left'] = `${sideMargin} !important`;
-      bodyStyle['padding-right'] = `${sideMargin} !important`;
-    }
+  // Keep fixed top/bottom clearance inside the iframe so reader overlays
+  // never occlude the first or last lines, even at the minimum margin setting.
+  bodyStyle['box-sizing'] = 'border-box !important';
+  bodyStyle['padding-top'] = `${safePaddingTop} !important`;
+  bodyStyle['padding-bottom'] = `${safePaddingBottom} !important`;
+  if (sideMargin) {
+    bodyStyle['padding-left'] = `${sideMargin} !important`;
+    bodyStyle['padding-right'] = `${sideMargin} !important`;
   }
 
   // Apply line-height and text-align to content elements too, so they
@@ -1524,7 +1582,9 @@ function applyThemeAndTypographyToDocument(
   const textAlign = isOriginal || typo.textAlign === 'original' ? undefined : typo.textAlign;
   const hyphens = isOriginal ? undefined : (typo.hyphenation ? 'auto' : 'manual');
   const sideMargin = isOriginal ? '0px' : `${typo.margin}px`;
-  const verticalMargin = isOriginal ? '0px' : `${typo.verticalMargin ?? 0}px`;
+  const verticalMargin = isOriginal ? 0 : typo.verticalMargin ?? 0;
+  const paddingTop = getEpubVerticalPaddingCss(verticalMargin, 'top', EPUB_CONTENT_TOP_CLEARANCE_PX);
+  const paddingBottom = getEpubVerticalPaddingCss(verticalMargin, 'bottom', EPUB_CONTENT_BOTTOM_CLEARANCE_PX);
   const paragraphSpacing = isOriginal ? undefined : `${typo.paragraphSpacing}em`;
 
   const colors = {
@@ -1556,7 +1616,10 @@ function applyThemeAndTypographyToDocument(
       box-sizing: border-box !important;
       background: ${bg} !important;
       color: ${fg} !important;
-      padding: ${verticalMargin} ${sideMargin} !important;
+      padding-top: ${paddingTop} !important;
+      padding-right: ${sideMargin} !important;
+      padding-bottom: ${paddingBottom} !important;
+      padding-left: ${sideMargin} !important;
       ${!useOriginalFont ? `font-family: ${fontFamily} !important;` : ''}
       ${lineHeight ? `line-height: ${lineHeight} !important;` : ''}
       ${textAlign ? `text-align: ${textAlign} !important;` : ''}

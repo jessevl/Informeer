@@ -10,6 +10,7 @@ import { cn, formatRelativeTime } from '@/lib/utils';
 import { Headphones, MoreHorizontal, Trash2, CloudOff, Check } from 'lucide-react';
 import { PodcastArtwork } from './PodcastArtwork';
 import type { Entry, Feed } from '@/types/api';
+import { useLongPress } from '@frameer/hooks';
 
 export interface PodcastGroup {
   feedId: number;
@@ -47,6 +48,16 @@ export function PodcastStack({ group, onOpen, isSelected = false, savedCount = 0
     onRemoveAllSaved?.(group.feedId);
   }, [group.feedId, onRemoveAllSaved]);
 
+  const { longPressHandlers } = useLongPress({
+    enabled: Boolean(onUnsubscribe || onRemoveAllSaved),
+    onLongPress: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setShowMenu(true);
+    },
+    duration: 450,
+  });
+
   return (
     <div className="group relative flex flex-col gap-2.5">
       {/* Stack of podcast artwork */}
@@ -59,6 +70,11 @@ export function PodcastStack({ group, onOpen, isSelected = false, savedCount = 0
             ? 'ring-2 ring-offset-2 ring-[var(--color-accent-primary)] ring-offset-[var(--color-surface-base)] scale-[1.02]'
             : 'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-[var(--color-surface-base)]'
         )}
+        onTouchStart={longPressHandlers.onTouchStart}
+        onTouchMove={longPressHandlers.onTouchMove}
+        onTouchEnd={longPressHandlers.onTouchEnd}
+        onTouchCancel={longPressHandlers.onTouchCancel}
+        onContextMenu={longPressHandlers.onContextMenu}
       >
         {/* Background stack layers — only show if more than 1 episode */}
         {episodeCount >= 3 && (

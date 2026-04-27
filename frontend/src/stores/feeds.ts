@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { api } from '@/api/client';
 import type { Feed, Category, FeedCounters, CreateFeedRequest, CreateFeedResponse } from '@/types/api';
 import { useSettingsStore } from './settings';
@@ -34,7 +35,8 @@ interface FeedsState {
   deleteCategory: (id: number) => Promise<void>;
 }
 
-export const useFeedsStore = create<FeedsState>((set, get) => ({
+export const useFeedsStore = create<FeedsState>()(
+  persist((set, get) => ({
   // Initial state
   feeds: [],
   categories: [],
@@ -250,4 +252,12 @@ export const useFeedsStore = create<FeedsState>((set, get) => ({
       throw error;
     }
   },
-}));
+  }), {
+    name: 'informeer-feeds',
+    partialize: (state) => ({
+      feeds: state.feeds,
+      categories: state.categories,
+      counters: state.counters,
+    }),
+  })
+);

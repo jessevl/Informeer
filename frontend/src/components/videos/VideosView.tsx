@@ -25,13 +25,7 @@ import { useSettingsStore } from '@/stores/settings';
 import type { Entry, Feed, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
-import {
-  PaginatedOverviewSurface,
-  useMeasuredContainerSize,
-  usePaginatedItems,
-  useResponsiveGridPageSize,
-  useResponsiveListPageSize,
-} from '@/components/overview/PaginatedOverview';
+
 
 interface VideosViewProps {
   feeds: Feed[];
@@ -75,50 +69,17 @@ function useVideoGridColumns(): number {
   return columns;
 }
 
-function PaginatedVideoCollection({
+function VideoCollection({
   entries,
   viewMode,
   onSelectEntry,
-  chromeOffset,
-  paginated,
 }: {
   entries: Entry[];
   viewMode: ViewMode;
   onSelectEntry: (entry: Entry) => void;
-  chromeOffset: number;
-  paginated: boolean;
 }) {
   const { isEntryWatched } = useVideoStore();
   const gridColumns = useVideoGridColumns();
-  const overviewRef = useRef<HTMLDivElement>(null);
-  const overviewSize = useMeasuredContainerSize(overviewRef);
-  const cardsPerPage = useResponsiveGridPageSize({
-    columns: gridColumns,
-    aspectRatio: 16 / 9,
-    metaHeight: 96,
-    containerSize: overviewSize,
-    gap: 12,
-    chromeOffset,
-  });
-  const listPerPage = useResponsiveListPageSize({
-    itemHeight: 148,
-    containerSize: overviewSize,
-    gap: 8,
-    chromeOffset,
-  });
-  const magazinePerPage = useResponsiveListPageSize({
-    itemHeight: 320,
-    containerSize: overviewSize,
-    gap: 16,
-    chromeOffset,
-  });
-  const itemsPerPage = viewMode === 'cards'
-    ? cardsPerPage
-    : viewMode === 'list'
-      ? listPerPage
-      : magazinePerPage;
-  const pagedEntries = usePaginatedItems(entries, itemsPerPage);
-  const visibleEntries = paginated ? pagedEntries.pageItems : entries;
 
   const content = (
     <div
@@ -130,7 +91,7 @@ function PaginatedVideoCollection({
       )}
       style={viewMode === 'cards' ? { gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` } : undefined}
     >
-      {visibleEntries.map((entry) => (
+      {entries.map((entry) => (
         <VideoCard
           key={entry.id}
           entry={entry}
@@ -142,25 +103,7 @@ function PaginatedVideoCollection({
     </div>
   );
 
-  if (!paginated) {
-    return <div className="h-full min-h-0 overflow-y-auto">{content}</div>;
-  }
-
-  return (
-    <div ref={overviewRef} className="h-full min-h-0">
-      <PaginatedOverviewSurface
-        currentPage={pagedEntries.currentPage}
-        pageCount={pagedEntries.pageCount}
-        totalItems={entries.length}
-        rangeStart={pagedEntries.rangeStart}
-        rangeEnd={pagedEntries.rangeEnd}
-        onPrevPage={pagedEntries.goToPrevPage}
-        onNextPage={pagedEntries.goToNextPage}
-      >
-        {content}
-      </PaginatedOverviewSurface>
-    </div>
-  );
+  return <div className="h-full min-h-0 overflow-y-auto">{content}</div>;
 }
 
 // Video Card Component
@@ -503,14 +446,12 @@ function ChannelDetail({
   viewMode,
   onSelectEntry,
   onPlayAll,
-  paginated,
 }: {
   feed: Feed;
   entries: Entry[];
   viewMode: ViewMode;
   onSelectEntry: (entry: Entry) => void;
   onPlayAll: () => void;
-  paginated: boolean;
 }) {
   const { isEntryWatched } = useVideoStore();
   const videoEntries = entries
@@ -552,12 +493,10 @@ function ChannelDetail({
 
       {/* Videos */}
       <div className="flex-1 min-h-0 content-below-header content-above-navbar">
-        <PaginatedVideoCollection
+        <VideoCollection
           entries={videoEntries}
           viewMode={viewMode}
           onSelectEntry={onSelectEntry}
-          chromeOffset={320}
-          paginated={paginated}
         />
       </div>
     </div>
@@ -575,7 +514,6 @@ export function VideosView({
 }: VideosViewProps) {
   const { isEntryWatched, playSeriesFromEntry } = useVideoStore();
   const videoCategoryId = useSettingsStore((s) => s.videoCategoryId);
-  const einkMode = useSettingsStore((s) => s.einkMode);
   const { effectiveOffline } = useEffectiveOfflineState();
 
   // Get video feeds from the configured category
@@ -621,7 +559,6 @@ export function VideosView({
         viewMode={viewMode}
         onSelectEntry={onSelectEntry}
         onPlayAll={() => handlePlaySeries(selectedFeed)}
-        paginated={einkMode}
       />
     );
   }
@@ -662,12 +599,10 @@ export function VideosView({
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex-1 min-h-0 content-below-header content-above-navbar">
-        <PaginatedVideoCollection
+        <VideoCollection
           entries={recentVideos}
           viewMode={viewMode}
           onSelectEntry={onSelectEntry}
-          chromeOffset={230}
-          paginated={einkMode}
         />
       </div>
     </div>

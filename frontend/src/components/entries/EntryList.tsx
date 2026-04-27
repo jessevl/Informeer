@@ -22,11 +22,6 @@ import type { Entry, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
 import { einkPower } from '@/services/eink-power';
-import {
-  PaginatedOverviewSurface,
-  useMeasuredContainerSize,
-  usePaginatedItems,
-} from '@/components/overview/PaginatedOverview';
 
 const EINK_INTERACTION_SETTLE_MS = 180;
 const EINK_MASONRY_LAYOUT_SETTLE_MS = 240;
@@ -301,7 +296,6 @@ const MAGAZINE_CARD_MIN_CHARS_PER_LINE = 34;
 const MAGAZINE_CARD_HORIZONTAL_PADDING = 32;
 const MAGAZINE_CARD_MAX_SINGLE_EXCERPT_LINES = 16;
 const MAGAZINE_CARD_MAX_WIDE_EXCERPT_LINES = 20;
-const PAGINATED_MAGAZINE_CONTENT_PADDING = 32;
 
 // Helper to get audio enclosure from entry
 function getAudioEnclosure(entry: Entry): Enclosure | null {
@@ -580,15 +574,6 @@ function getMagazineExcerptCharactersPerLine(cardWidth: number): number {
   );
 }
 
-function getScrollContainerVerticalPadding(element: HTMLElement | null): number {
-  if (!element || typeof window === 'undefined') {
-    return 0;
-  }
-
-  const computedStyle = window.getComputedStyle(element);
-  return (parseFloat(computedStyle.paddingTop) || 0) + (parseFloat(computedStyle.paddingBottom) || 0);
-}
-
 function getPreferredMagazineExcerptLines(readingTime: number, baseExcerptLines: number): number {
   if (readingTime < 3) {
     return Math.max(MAGAZINE_CARD_MIN_EXCERPT_LINES, baseExcerptLines - 2);
@@ -634,306 +619,6 @@ function getMagazineCardHeight(baseHeight: number, excerptLines: number): number
 function estimateMagazineItemHeight(entry: Entry, showImages: boolean, excerptLines: number): number {
   const sizing = getMagazineCardSizing(entry, showImages, excerptLines, MAGAZINE_CARD_ESTIMATED_WIDTH, 1);
   return getMagazineCardHeight(sizing.baseHeight, sizing.preferredLines);
-}
-
-interface PaginatedMagazineItemLayout {
-  entry: Entry;
-  lane: number;
-  top: number;
-  height: number;
-  excerptLines: number;
-  excerptCharBudget: number;
-  colSpan: number;
-}
-
-interface PaginatedMagazinePage {
-  items: PaginatedMagazineItemLayout[];
-  totalHeight: number;
-  startIndex: number;
-  endIndex: number;
-}
-
-function getShortestLanePlacement(laneHeights: number[], colSpan: number): { lane: number; top: number } {
-  const normalizedColSpan = Math.max(1, Math.min(colSpan, laneHeights.length));
-  let bestLane = 0;
-  let bestTop = Number.POSITIVE_INFINITY;
-
-  for (let lane = 0; lane <= laneHeights.length - normalizedColSpan; lane += 1) {
-    const top = Math.max(...laneHeights.slice(lane, lane + normalizedColSpan));
-    if (top < bestTop) {
-      bestLane = lane;
-      bestTop = top;
-    }
-  }
-
-  return {
-    lane: bestLane,
-    top: Number.isFinite(bestTop) ? bestTop : 0,
-  };
-}
-
-function buildPaginatedMagazinePages(
-  entries: Entry[],
-  lanes: number,
-  availableHeight: number,
-  getCardSizing: (entry: Entry, colSpan: number) => MagazineCardSizing,
-  gap: number,
-): PaginatedMagazinePage[] {
-  if (entries.length === 0) {
-    return [];
-  }
-
-  const normalizedLanes = Math.max(1, lanes);
-  const maxPageHeight = Math.max(320, availableHeight);
-  const pages: PaginatedMagazinePage[] = [];
-
-  let currentItems: PaginatedMagazineItemLayout[] = [];
-  let laneHeights = new Array(normalizedLanes).fill(0) as number[];
-  let pageStartIndex = 0;
-
-  const finalizePage = (endIndex: number) => {
-    const pageItems = currentItems.map((item) => ({ ...item }));
-    const laneLastItemIndices = new Array(normalizedLanes).fill(-1);
-
-    pageItems.forEach((item, index) => {
-      for (let laneIndex = item.lane; laneIndex < item.lane + item.colSpan; laneIndex += 1) {
-        laneLastItemIndices[laneIndex] = index;
-      }
-    });
-
-    Array.from(new Set(laneLastItemIndices.filter((itemIndex) => itemIndex >= 0))).forEach((itemIndex) => {
-      if (itemIndex < 0) return;
-
-      const item = pageItems[itemIndex];
-      const sizing = getCardSizing(item.entry, item.colSpan);
-      let remainingHeight = maxPageHeight - (item.top + item.height);
-
-      if (remainingHeight <= 0) return;
-
-      const extraLinesAllowed = Math.max(0, sizing.maxLines - item.excerptLines);
-      const extraLines = Math.min(
-        extraLinesAllowed,
-        Math.floor(remainingHeight / CARD_EXCERPT_HEIGHT_PER_LINE),
-      );
-
-      if (extraLines > 0) {
-        item.excerptLines += extraLines;
-        item.height += extraLines * CARD_EXCERPT_HEIGHT_PER_LINE;
-        item.excerptCharBudget = item.excerptLines * sizing.excerptCharsPerLine;
-        remainingHeight -= extraLines * CARD_EXCERPT_HEIGHT_PER_LINE;
-      }
-
-      if (remainingHeight > 0) {
-        item.height += remainingHeight;
-      }
-    });
-
-    pages.push({
-      items: pageItems,
-      totalHeight: maxPageHeight,
-      startIndex: pageStartIndex,
-      endIndex,
-    });
-  };
-
-  const getFittingExcerptLines = (sizing: MagazineCardSizing, remainingHeight: number) => {
-    const maxFittingLines = Math.floor((remainingHeight - sizing.baseHeight) / CARD_EXCERPT_HEIGHT_PER_LINE);
-    if (maxFittingLines < sizing.minLines) {
-      return null;
-    }
-
-    return Math.max(
-      sizing.minLines,
-      Math.min(sizing.preferredLines, sizing.maxLines, maxFittingLines),
-    );
-  };
-
-  entries.forEach((entry, index) => {
-    const candidateColSpans = getMagazineCardCandidateColSpans(entry, normalizedLanes);
-    let placement: {
-      lane: number;
-      top: number;
-      excerptLines: number;
-      sizing: MagazineCardSizing;
-    } | null = null;
-
-    for (const candidateColSpan of candidateColSpans) {
-      const sizing = getCardSizing(entry, candidateColSpan);
-      const lanePlacement = getShortestLanePlacement(laneHeights, sizing.colSpan);
-      const excerptLines = getFittingExcerptLines(sizing, maxPageHeight - lanePlacement.top);
-
-      if (excerptLines === null) {
-        continue;
-      }
-
-      placement = {
-        lane: lanePlacement.lane,
-        top: lanePlacement.top,
-        excerptLines,
-        sizing,
-      };
-      break;
-    }
-
-    if (placement === null && currentItems.length > 0) {
-      finalizePage(index - 1);
-      currentItems = [];
-      laneHeights = new Array(normalizedLanes).fill(0);
-      pageStartIndex = index;
-
-      for (const candidateColSpan of candidateColSpans) {
-        const sizing = getCardSizing(entry, candidateColSpan);
-        const excerptLines = getFittingExcerptLines(sizing, maxPageHeight);
-
-        if (excerptLines === null) {
-          continue;
-        }
-
-        placement = {
-          lane: 0,
-          top: 0,
-          excerptLines,
-          sizing,
-        };
-        break;
-      }
-    }
-
-    if (placement === null) {
-      const sizing = getCardSizing(entry, 1);
-      placement = {
-        lane: 0,
-        top: 0,
-        excerptLines: sizing.minLines,
-        sizing,
-      };
-    }
-
-    const itemHeight = Math.min(
-      maxPageHeight - placement.top,
-      getMagazineCardHeight(placement.sizing.baseHeight, placement.excerptLines),
-    );
-
-    currentItems.push({
-      entry,
-      lane: placement.lane,
-      top: placement.top,
-      height: itemHeight,
-      excerptLines: placement.excerptLines,
-      excerptCharBudget: placement.excerptLines * placement.sizing.excerptCharsPerLine,
-      colSpan: placement.sizing.colSpan,
-    });
-
-    for (let laneIndex = placement.lane; laneIndex < placement.lane + placement.sizing.colSpan; laneIndex += 1) {
-      laneHeights[laneIndex] = placement.top + itemHeight + gap;
-    }
-  });
-
-  if (currentItems.length > 0) {
-    finalizePage(entries.length - 1);
-  }
-
-  return pages;
-}
-
-function PaginatedMagazineFeed({
-  entries,
-  onSelect,
-  showImages,
-  excerptLines,
-  scrollContainerRef,
-  hasMore,
-  isLoading,
-  isLoadingMore,
-  onLoadMore,
-  onLayoutActivity,
-}: VirtualizedMasonryProps) {
-  const { currentBreakpoint } = useBreakpoint(masonryBreakpoints);
-  const containerSize = useMeasuredContainerSize(scrollContainerRef);
-  const lanes = currentBreakpoint.nCol;
-  const columnGap = 16;
-  const scrollContainer = scrollContainerRef.current;
-  const measuredContainerHeight = scrollContainer?.clientHeight ?? containerSize?.height ?? (window.innerHeight - 240);
-  const measuredContainerWidth = scrollContainer?.clientWidth ?? containerSize?.width ?? window.innerWidth;
-  const availableHeight = Math.max(
-    320,
-    measuredContainerHeight
-      - getScrollContainerVerticalPadding(scrollContainer)
-      - PAGINATED_MAGAZINE_CONTENT_PADDING,
-  );
-  const gridWidth = Math.max(240, measuredContainerWidth - PAGINATED_MAGAZINE_CONTENT_PADDING);
-  const laneWidth = Math.max(160, (gridWidth - columnGap * (Math.max(1, lanes) - 1)) / Math.max(1, lanes));
-
-  const getCardSizing = useCallback((entry: Entry, colSpan: number) => {
-    const normalizedColSpan = Math.max(1, Math.min(colSpan, Math.max(1, lanes)));
-    const cardWidth = laneWidth * normalizedColSpan + columnGap * (normalizedColSpan - 1);
-    return getMagazineCardSizing(entry, showImages, excerptLines, cardWidth, normalizedColSpan);
-  }, [columnGap, excerptLines, laneWidth, lanes, showImages]);
-
-  const pageLayouts = useMemo(() => {
-    return buildPaginatedMagazinePages(entries, lanes, availableHeight, getCardSizing, columnGap);
-  }, [entries, lanes, availableHeight, getCardSizing]);
-
-  const pagedLayouts = usePaginatedItems(pageLayouts, 1);
-  const currentPageLayout = pagedLayouts.pageItems[0] ?? null;
-  const normalizedLanes = Math.max(1, lanes);
-  const columnWidth = 100 / normalizedLanes;
-
-  useEffect(() => {
-    onLayoutActivity?.();
-  }, [onLayoutActivity, pagedLayouts.currentPage, entries.length, lanes, showImages, excerptLines]);
-
-  useEffect(() => {
-    if (!hasMore || isLoading || isLoadingMore) return;
-    if (pagedLayouts.currentPage < pagedLayouts.pageCount - 1) return;
-    onLoadMore();
-  }, [hasMore, isLoading, isLoadingMore, onLoadMore, pagedLayouts.currentPage, pagedLayouts.pageCount]);
-
-  return (
-    <PaginatedOverviewSurface
-      currentPage={pagedLayouts.currentPage}
-      pageCount={pagedLayouts.pageCount}
-      totalItems={entries.length}
-      rangeStart={currentPageLayout ? currentPageLayout.startIndex + 1 : 0}
-      rangeEnd={currentPageLayout ? currentPageLayout.endIndex + 1 : 0}
-      onPrevPage={pagedLayouts.goToPrevPage}
-      onNextPage={pagedLayouts.goToNextPage}
-      contentClassName="p-4"
-    >
-      <div
-        className="relative"
-        style={{ height: currentPageLayout?.totalHeight || 0 }}
-      >
-        {currentPageLayout?.items.map((item) => {
-          const left = item.lane * columnWidth;
-
-          return (
-            <div
-              key={item.entry.id}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: `calc(${left}% + ${item.lane * columnGap / normalizedLanes}px)`,
-                width: `calc(${columnWidth * item.colSpan}% - ${columnGap * (normalizedLanes - item.colSpan) / normalizedLanes}px)`,
-                transform: `translateY(${item.top}px)`,
-              }}
-            >
-              <MagazineItem
-                entry={item.entry}
-                onSelect={onSelect}
-                showImages={showImages}
-                baseExcerptLines={excerptLines}
-                excerptLinesOverride={item.excerptLines}
-                excerptCharBudget={item.excerptCharBudget}
-                targetHeight={item.height}
-                colSpan={item.colSpan}
-              />
-            </div>
-          );
-        })}
-      </div>
-    </PaginatedOverviewSurface>
-  );
 }
 
 // Virtualized Masonry Component
@@ -1215,7 +900,7 @@ export function EntryList({
               : isPulling
                 ? 'feed-pulling'
                 : undefined,
-      gestureModel: viewMode === 'magazine' && einkMode ? 'paginated' : 'scroll',
+            gestureModel: 'scroll',
     });
 
     return () => {
@@ -1388,20 +1073,7 @@ export function EntryList({
     }
     
     if (viewMode === 'magazine') {
-      return einkMode ? (
-        <PaginatedMagazineFeed
-          entries={entries}
-          onSelect={handleMagazineSelect}
-          showImages={showImages}
-          excerptLines={magazineExcerptLines}
-          scrollContainerRef={listRef}
-          hasMore={hasMore}
-          isLoading={isLoading}
-          isLoadingMore={isLoadingMore}
-          onLoadMore={onLoadMore}
-          onLayoutActivity={handleMasonryLayoutActivity}
-        />
-      ) : (
+      return (
         <VirtualizedMasonry
           entries={entries}
           onSelect={handleMagazineSelect}

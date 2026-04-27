@@ -21,15 +21,8 @@ import type { Entry, Feed } from '@/types/api';
 import { removeOfflineItem } from '@/lib/offline/blob-cache';
 import { useOfflineStore, useOfflineRegistry } from '@/stores/offline';
 import { useFeedsStore } from '@/stores/feeds';
-import { useSettingsStore } from '@/stores/settings';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
-import {
-  PaginatedOverviewSurface,
-  useMeasuredContainerSize,
-  usePaginatedItems,
-  useResponsiveGridPageSize,
-} from '@/components/overview/PaginatedOverview';
 
 /** Breakpoint → column count, must stay in sync with the grid-cols-* classes below */
 function useGridColumns() {
@@ -49,27 +42,6 @@ function getColCount(): number {
   if (w >= 768) return 4;  // md
   if (w >= 640) return 3;  // sm
   return 2;                // default
-}
-
-function usePaginatedGridColumns() {
-  const [cols, setCols] = useState(() => getPaginatedColCount());
-  useEffect(() => {
-    const onResize = () => setCols(getPaginatedColCount());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return cols;
-}
-
-function getPaginatedColCount(): number {
-  const w = window.innerWidth;
-  if (w >= 1700) return 8;
-  if (w >= 1450) return 7;
-  if (w >= 1200) return 6;
-  if (w >= 900) return 5;
-  if (w >= 640) return 4;
-  if (w >= 480) return 3;
-  return 2;
 }
 
 interface MagazinesViewProps {
@@ -174,9 +146,9 @@ export function MagazinesView({
   onRefresh,
 }: MagazinesViewProps) {
   const gridColumns = useGridColumns();
-  const paginatedGridColumns = usePaginatedGridColumns();
   const {
     subscriptions,
+    isLoadingSubscriptions,
     magazineFeedIds,
     isPdfViewerOpen,
     selectedIssue,
@@ -199,12 +171,9 @@ export function MagazinesView({
   // Track the feed whose row is currently mounted (stays set during close animation)
   const [mountedFeedId, setMountedFeedId] = useState<number | null>(null);
   const [showOfflineOnly, setShowOfflineOnly] = useState(false);
-  const einkMode = useSettingsStore((s) => s.einkMode);
   const { effectiveOffline } = useEffectiveOfflineState();
   const effectiveOfflineOnly = effectiveOffline || showOfflineOnly;
   const gridRef = useRef<HTMLDivElement>(null);
-  const overviewRef = useRef<HTMLDivElement>(null);
-  const overviewSize = useMeasuredContainerSize(overviewRef);
 
   // Fetch subscriptions on mount
   useEffect(() => {
@@ -400,17 +369,8 @@ export function MagazinesView({
     }
     return counts;
   }, [displayedGroups, offlineRegistry]);
-  const groupsPerPage = useResponsiveGridPageSize({
-    columns: paginatedGridColumns,
-    aspectRatio: 3 / 4,
-    metaHeight: 84,
-    containerSize: overviewSize,
-    gap: 24,
-    chromeOffset: effectiveOffline ? 250 : 290,
-  });
-  const pagedGroups = usePaginatedItems(displayedGroups, groupsPerPage);
-  const visibleGroups = einkMode ? pagedGroups.pageItems : displayedGroups;
-  const visibleColumns = einkMode ? paginatedGridColumns : gridColumns;
+  const visibleGroups = displayedGroups;
+  const visibleColumns = gridColumns;
 
   // Resolve the currently selected group from the feedId
   const selectedGroup = useMemo(() => {
@@ -520,7 +480,7 @@ export function MagazinesView({
       <div className="flex flex-col h-full relative">
         {/* Stack grid view — always visible */}
         <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header content-above-navbar">
-          {subscriptions.length === 0 ? (
+          {magazineFeeds.length === 0 && !isLoadingSubscriptions ? (
             // Empty state
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-tertiary)] p-8">
               <Library size={64} className="mb-6 opacity-30" />
@@ -575,104 +535,48 @@ export function MagazinesView({
                   }]}
                 />
               )}
-              <div ref={overviewRef} className="flex-1 min-h-0">
-                {einkMode ? (
-                  <PaginatedOverviewSurface
-                    currentPage={pagedGroups.currentPage}
-                    pageCount={pagedGroups.pageCount}
-                    totalItems={displayedGroups.length}
-                    rangeStart={pagedGroups.rangeStart}
-                    rangeEnd={pagedGroups.rangeEnd}
-                    onPrevPage={pagedGroups.goToPrevPage}
-                    onNextPage={pagedGroups.goToNextPage}
-                    enabled={!isPdfViewerOpen}
-                  >
-                    <div
-                      ref={gridRef}
-                      className="grid gap-x-8 gap-y-6 p-6"
-                      style={{ gridTemplateColumns: `repeat(${visibleColumns}, minmax(0, 1fr))` }}
-                    >
-                      {/* Placeholder stacks for feeds still loading entries */}
-                      {pagedGroups.currentPage === 0 && visibleLoadingFeeds.map(feed => (
-                        <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
-                          <div className={cn(
-                            'relative aspect-[3/4] w-full rounded-lg',
-                            'bg-[var(--color-surface-secondary)]',
-                            'flex items-center justify-center',
-                            'animate-pulse',
-                          )}>
-                            <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
-                          </div>
-                          <div className="flex flex-col gap-0.5 px-0.5">
-                            <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
-                              {feed.title}
-                            </h3>
-                            <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
-                          </div>
-                        </div>
-                      ))}
-                      {renderStacksWithIssueRow(
-                        visibleGroups,
-                        visibleColumns,
-                        selectedFeedId,
-                        mountedFeedId,
-                        handleToggleGroup,
-                        handleOpenIssue,
-                        handleRowClosed,
-                        setSelectedFeedId,
-                        progressMap,
-                        handleRetryIssue,
-                        savedCountByFeed,
-                        handleUnsubscribe,
-                        handleRemoveAllSaved,
-                      )}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <div
+                  ref={gridRef}
+                  className={cn(
+                    'grid gap-x-8 gap-y-6 p-6',
+                    'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
+                  )}
+                >
+                  {visibleLoadingFeeds.map(feed => (
+                    <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
+                      <div className={cn(
+                        'relative aspect-[3/4] w-full rounded-lg',
+                        'bg-[var(--color-surface-secondary)]',
+                        'flex items-center justify-center',
+                        'animate-pulse',
+                      )}>
+                        <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
+                      </div>
+                      <div className="flex flex-col gap-0.5 px-0.5">
+                        <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
+                          {feed.title}
+                        </h3>
+                        <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
+                      </div>
                     </div>
-                  </PaginatedOverviewSurface>
-                ) : (
-                  <div className="h-full min-h-0 overflow-y-auto">
-                    <div
-                      ref={gridRef}
-                      className={cn(
-                        'grid gap-x-8 gap-y-6 p-6',
-                        'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
-                      )}
-                    >
-                      {visibleLoadingFeeds.map(feed => (
-                        <div key={`loading-${feed.id}`} className="flex flex-col gap-2.5">
-                          <div className={cn(
-                            'relative aspect-[3/4] w-full rounded-lg',
-                            'bg-[var(--color-surface-secondary)]',
-                            'flex items-center justify-center',
-                            'animate-pulse',
-                          )}>
-                            <Loader2 size={28} className="text-[var(--color-text-tertiary)] animate-spin" />
-                          </div>
-                          <div className="flex flex-col gap-0.5 px-0.5">
-                            <h3 className="text-sm font-semibold leading-tight line-clamp-2 text-[var(--color-text-primary)]">
-                              {feed.title}
-                            </h3>
-                            <span className="text-xs text-[var(--color-text-tertiary)]">Fetching issues…</span>
-                          </div>
-                        </div>
-                      ))}
-                      {renderStacksWithIssueRow(
-                        visibleGroups,
-                        visibleColumns,
-                        selectedFeedId,
-                        mountedFeedId,
-                        handleToggleGroup,
-                        handleOpenIssue,
-                        handleRowClosed,
-                        setSelectedFeedId,
-                        progressMap,
-                        handleRetryIssue,
-                        savedCountByFeed,
-                        handleUnsubscribe,
-                        handleRemoveAllSaved,
-                      )}
-                    </div>
-                  </div>
-                )}
+                  ))}
+                  {renderStacksWithIssueRow(
+                    visibleGroups,
+                    visibleColumns,
+                    selectedFeedId,
+                    mountedFeedId,
+                    handleToggleGroup,
+                    handleOpenIssue,
+                    handleRowClosed,
+                    setSelectedFeedId,
+                    progressMap,
+                    handleRetryIssue,
+                    savedCountByFeed,
+                    handleUnsubscribe,
+                    handleRemoveAllSaved,
+                  )}
+                </div>
               </div>
             </>
           )}

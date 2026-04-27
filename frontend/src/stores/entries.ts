@@ -96,6 +96,13 @@ function isVideoEntry(entry: Entry): boolean {
 }
 
 interface EntriesState {
+  entriesCache: Record<string, {
+    entries: Entry[];
+    total: number;
+    offset: number;
+    hasMore: boolean;
+  }>;
+
   // State
   entries: Entry[];
   selectedEntry: Entry | null;
@@ -132,6 +139,7 @@ interface EntriesState {
 
 export const useEntriesStore = create<EntriesState>((set, get) => ({
   // Initial state
+  entriesCache: {},
   entries: [],
   selectedEntry: null,
   total: 0,
@@ -163,6 +171,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     const requestId = ++latestEntriesRequestId;
     const { status, feedId, categoryId, starred, searchQuery, limit, mediaType } = get();
     const filterSnapshot: ClientFilterSnapshot = { feedId, categoryId, mediaType };
+    const filterKey = buildFilterKey({ status, feedId, categoryId, starred, searchQuery, mediaType });
 
     if (reset) {
       if (get().entries.length === 0) {
@@ -239,14 +248,23 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         }
       }
 
-      set({
+      set((state) => ({
         entries: accumulatedEntries,
         total,
         offset: nextOffset,
         hasMore: nextOffset < total,
         isLoading: false,
         isRefetching: false,
-      });
+        entriesCache: {
+          ...state.entriesCache,
+          [filterKey]: {
+            entries: accumulatedEntries,
+            total,
+            offset: nextOffset,
+            hasMore: nextOffset < total,
+          },
+        },
+      }));
       markRefreshed('entries');
       markApiSuccess();
     } catch (error) {
@@ -271,6 +289,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
   fetchMoreEntries: async () => {
     const { status, feedId, categoryId, starred, searchQuery, limit, offset, hasMore, isLoadingMore, mediaType, entries } = get();
     const filterSnapshot: ClientFilterSnapshot = { feedId, categoryId, mediaType };
+    const filterKey = buildFilterKey({ status, feedId, categoryId, starred, searchQuery, mediaType });
 
     if (!hasMore || isLoadingMore) return;
 
@@ -340,12 +359,24 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         }
       }
 
-      set((state) => ({
-        entries: [...state.entries, ...accumulatedEntries],
-        offset: nextOffset,
-        hasMore: nextOffset < total,
-        isLoadingMore: false,
-      }));
+      set((state) => {
+        const nextEntries = [...state.entries, ...accumulatedEntries];
+        return {
+          entries: nextEntries,
+          offset: nextOffset,
+          hasMore: nextOffset < total,
+          isLoadingMore: false,
+          entriesCache: {
+            ...state.entriesCache,
+            [filterKey]: {
+              entries: nextEntries,
+              total,
+              offset: nextOffset,
+              hasMore: nextOffset < total,
+            },
+          },
+        };
+      });
     } catch (error) {
       if (requestId !== latestEntriesRequestId) {
         return;
@@ -370,15 +401,17 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       mediaType: hasOwn(filter, 'mediaType') ? (filter.mediaType as EntriesState['mediaType']) : current.mediaType,
     };
     const isScopeChange = buildFilterKey(current) !== buildFilterKey(nextFilter);
+    const nextFilterKey = buildFilterKey(nextFilter);
+    const cachedScope = current.entriesCache[nextFilterKey];
 
     if (isScopeChange) {
       latestEntriesRequestId += 1;
       set({
         ...nextFilter,
-        entries: [],
-        total: 0,
-        offset: 0,
-        hasMore: false,
+        entries: cachedScope?.entries ?? [],
+        total: cachedScope?.total ?? 0,
+        offset: cachedScope?.offset ?? 0,
+        hasMore: cachedScope?.hasMore ?? false,
         isLoadingMore: false,
         isRefetching: false,
         error: null,

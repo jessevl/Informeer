@@ -96,7 +96,7 @@ export function ArticleReader({
 
   // Auto-hide the prev/next entry navigation buttons after inactivity
   // (useAutoHideControls call is below, after showComments is declared)
-  const [showNavButtons, setShowNavButtons] = useState(true);
+  const [showNavButtons, setShowNavButtons] = useState(() => !useSettingsStore.getState().einkMode);
 
   const startEinkWork = useCallback((reason: string) => {
     const tag = `${entryWorkPrefix}:${reason}:${Date.now()}`;
@@ -116,6 +116,10 @@ export function ArticleReader({
   // Auto-hide the prev/next entry navigation buttons after inactivity.
   // Suppressed while panels are open so buttons don't vanish mid-interaction.
   useAutoHideControls(showNavButtons, setShowNavButtons, !isPaginated || showTypography || showComments, readerToolbarHideDelay * 1000);
+
+  useEffect(() => {
+    setShowNavButtons(!(useSettingsStore.getState().einkMode && isPaginated));
+  }, [entry.id, isPaginated]);
   
   // Update showComments when entry changes (keep closed on mobile)
   useEffect(() => {

@@ -316,6 +316,8 @@ export const useBooksStore = create<BooksState>()(
     {
       name: 'informeer-books',
       partialize: (state) => ({
+        books: state.books,
+        total: state.total,
         progressCache: state.progressCache,
       }),
     }

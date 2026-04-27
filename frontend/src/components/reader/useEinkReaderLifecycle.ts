@@ -59,7 +59,16 @@ export function useEinkWorkTag({ prefix, replaceOnStart = true }: EinkWorkTagOpt
         tagRef.current = null;
       }
       if (markReady) {
+        await einkPower.waitForPaintCommit();
+        const state = await einkPower.getState();
+        if (!state.eligible || state.pendingCriticalWork > 0) {
+          return;
+        }
         await einkPower.markVisualStable();
+        const updatedState = await einkPower.getState();
+        if (!updatedState.eligible || updatedState.pendingCriticalWork > 0) {
+          return;
+        }
         await einkPower.notifyInteractiveReady();
       }
     } else {

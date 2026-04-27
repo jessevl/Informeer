@@ -11,7 +11,7 @@ import { log } from './logger.ts';
 // ---------------------------------------------------------------------------
 
 export const BROWSER_USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 
 export const BOT_USER_AGENT =
   'Informeer/1.0 (+https://github.com/informeer)';
@@ -24,8 +24,9 @@ export const MAX_RESPONSE_BYTES = 15 * 1024 * 1024;
 export const FEED_ACCEPT =
   'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, */*';
 
+// Chrome 136 navigation Accept header — DataDome checks for the full string.
 export const HTML_ACCEPT =
-  'text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8';
+  'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7';
 
 // ---------------------------------------------------------------------------
 // Per-domain rate limiter — prevents hammering any single host
@@ -209,17 +210,36 @@ export function htmlFetchHeaders(overrides?: {
   cookie?: string;
   referer?: string;
 }): Record<string, string> {
+  const ua = overrides?.userAgent || BROWSER_USER_AGENT;
+  // Only send Chrome Client Hints when using the real browser UA —
+  // bot/crawler UAs (Googlebot, Informeer) don't send these.
+  const isChrome = ua.includes('Chrome/') && !ua.includes('Googlebot') && !ua.includes('Informeer');
   const h: Record<string, string> = {
     Accept: HTML_ACCEPT,
     'Accept-Language': 'en-US,en;q=0.9,nl;q=0.8',
-    'User-Agent': overrides?.userAgent || BROWSER_USER_AGENT,
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'User-Agent': ua,
+    // Chrome sends max-age=0 on normal navigations (no-cache only on hard-reload).
+    // Pragma is an HTTP/1.0 relic; modern Chrome does not send it.
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    // Sec-Fetch metadata — browsers send these on every top-level navigation.
+    // Bot-detection services (e.g. DataDome) check for their presence.
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': overrides?.referer ? 'cross-site' : 'none',
+    'Sec-Fetch-User': '?1',
     // Close the connection after each request.
     // Prevents keep-alive socket-reuse issues that cause SIGSEGV
     // in Bun when servers (e.g. tweakers.net) close connections early.
     Connection: 'close',
   };
+  if (isChrome) {
+    // Chrome User-Agent Client Hints — DataDome flags their absence as a bot signal.
+    h['Sec-Ch-Ua'] = '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"';
+    h['Sec-Ch-Ua-Mobile'] = '?0';
+    h['Sec-Ch-Ua-Platform'] = '"macOS"';
+  }
   if (overrides?.cookie) h['Cookie'] = overrides.cookie;
   if (overrides?.referer) h['Referer'] = overrides.referer;
   return h;
