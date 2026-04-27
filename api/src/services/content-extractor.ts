@@ -185,6 +185,14 @@ const REMOVE_SELECTORS = [
   // Print / reading-progress chrome
   '[class*="progress-bar"]', '[id*="progress-bar"]',
   '[class*="reading-progress"]',
+  // Ars Technica gallery navigation chrome
+  // Block-pixel SVG arrows that Ars uses as left/right gallery toggles;
+  // without Tailwind CSS they render as large block-level SVG elements.
+  '.ars-gallery-caption-arrow',
+  // Ars Technica has separate mobile/desktop caption copies using Tailwind
+  // responsive classes (md:hidden = mobile-only). Strip the mobile copy to
+  // prevent duplicate caption text when Tailwind CSS is not applied.
+  '.ars-gallery-caption',
 ];
 
 // ---------------------------------------------------------------------------

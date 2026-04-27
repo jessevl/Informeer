@@ -249,6 +249,12 @@ const STRUCTURAL_CHROME_SELECTORS = [
   'dmt-inline-article-widget',
   // NYT – accessibility label span inside the lazy-image photo wrapper (shows as literal "Image")
   '[data-testid="photoviewer-children-figure"] > span',
+  // Ars Technica gallery navigation chrome
+  // Block-pixel SVG arrows rendered inline as gallery navigation toggles;
+  // without Tailwind CSS they render as large block-level SVG elements.
+  '.ars-gallery-caption-arrow',
+  // Ars Technica duplicate mobile-only caption divs (Tailwind md:hidden)
+  '.ars-gallery-caption',
 ];
 
 /**
