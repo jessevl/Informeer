@@ -78,10 +78,12 @@ function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
 }
 
-// Minimum viewport width to auto-enable spread (two-column) view.
-// 400px covers 7-inch eink tablets at typical DPI settings while excluding
-// most phones (360–393 px CSS width).
-const EPUB_MIN_SPREAD_WIDTH_PX = 400;
+// Minimum viewport width to auto-enable spread (two-column) view on first
+// load.  320px ensures any 7-inch tablet (even at high DPI) qualifies while
+// excluding very narrow phones (~320 px CSS width is the practical floor).
+// Note: we use spread:'always' (not 'auto') so epubjs never overrides our
+// decision based on its own internal 800 px minSpreadWidth default.
+const EPUB_MIN_SPREAD_WIDTH_PX = 320;
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
@@ -690,7 +692,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         const rendition = epub.renderTo(viewerEl, {
           width: '100%',
           height: '100%',
-          spread: (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible) ? 'auto' : 'none',
+          // 'always' bypasses epubjs's internal minSpreadWidth (default 800 px)
+          // which would prevent spread on any e-ink tablet-sized viewport.
+          spread: (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible) ? 'always' : 'none',
           flow: 'paginated',
           allowScriptedContent: true,
         } as any);
@@ -1036,7 +1040,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   useEffect(() => {
     if (renditionRef.current) {
       startEinkWork('spread');
-      (renditionRef.current as any).spread(isSpreadView ? 'auto' : 'none');
+      (renditionRef.current as any).spread(isSpreadView ? 'always' : 'none');
       queueRestoreToCfi();
     }
   }, [isSpreadView, queueRestoreToCfi, startEinkWork]);

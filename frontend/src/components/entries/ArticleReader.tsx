@@ -80,7 +80,10 @@ export function ArticleReader({
   const setArticleTypography = useSettingsStore((s) => s.setArticleTypography);
   const readerToolbarHideDelay = useSettingsStore((s) => s.readerToolbarHideDelay);
   const isPaginated = articleTypography.readingMode === 'paginated';
-  const isOverlayReaderLayout = isMobile || fullscreen;
+  // Paginated mode needs full-viewport width for accurate column measurement and
+  // layout, so always use the overlay (fixed inset-0) path regardless of device
+  // type or eink mode.  Non-paginated scroll mode respects the normal heuristic.
+  const isOverlayReaderLayout = isMobile || fullscreen || isPaginated;
   const isDarkMode = useResolvedIsDark();
   const entryWorkPrefix = `article:${entry.id}`;
   
