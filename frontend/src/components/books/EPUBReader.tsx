@@ -78,7 +78,7 @@ function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
 }
 
-const EPUB_MIN_SPREAD_WIDTH_PX = 600;
+const EPUB_MIN_SPREAD_WIDTH_PX = 480;
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
@@ -465,35 +465,40 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     if (!renditionRef.current || !canGoNext || isAnimatingRef.current) return;
     if (nextAttemptInProgressRef.current) return;
 
-    nextAttemptInProgressRef.current = true;
+    // Do NOT pre-set nextAttemptInProgressRef here — runRenditionPageTurn is the
+    // sole setter/clearer. Pre-setting it before the animation callback causes
+    // runRenditionPageTurn's own guard to see the flag as already true and refuse
+    // to start, leaving the flag permanently stuck and blocking all navigation.
     startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-left', () => {
       const rendition = renditionRef.current;
       if (!runRenditionPageTurn(nextAttemptInProgressRef, rendition ? () => rendition.next() : null)) {
         isAnimatingRef.current = false;
+        void finishEinkWork(false);
         return;
       }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoNext, animatePageTurn, runRenditionPageTurn, startEinkWork]);
+  }, [canGoNext, animatePageTurn, runRenditionPageTurn, startEinkWork, finishEinkWork]);
 
   const prevPage = useCallback(() => {
     if (!renditionRef.current || !canGoPrev || isAnimatingRef.current) return;
     if (prevAttemptInProgressRef.current) return;
 
-    prevAttemptInProgressRef.current = true;
+    // Do NOT pre-set prevAttemptInProgressRef here — same reason as nextPage above.
     startEinkWork('page-turn');
     isAnimatingRef.current = true;
     animatePageTurn('slide-right', () => {
       const rendition = renditionRef.current;
       if (!runRenditionPageTurn(prevAttemptInProgressRef, rendition ? () => rendition.prev() : null)) {
         isAnimatingRef.current = false;
+        void finishEinkWork(false);
         return;
       }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoPrev, animatePageTurn, runRenditionPageTurn, startEinkWork]);
+  }, [canGoPrev, animatePageTurn, runRenditionPageTurn, startEinkWork, finishEinkWork]);
 
   // Instant variants for keyboard/hardware-button navigation — no animation delay.
   // Keyboard nav never has a visible slide (the user pressed a key, not swiped),
