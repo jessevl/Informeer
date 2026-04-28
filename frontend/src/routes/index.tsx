@@ -100,7 +100,10 @@ function HomePage() {
     getViewModeForScope,
   } = useSettingsStore();
   const isLandscapeViewport = useIsLandscapeViewport();
-  const preferFullscreenMagazineReader = einkMode && (viewMode === 'magazine' || !isLandscapeViewport);
+  // In eink mode, always use fullscreen/overlay for the article reader so the
+  // full viewport width is available for paginated two-column layout even in
+  // landscape, where the "desktop" side-panel layout is too narrow.
+  const preferFullscreenMagazineReader = einkMode;
 
   const viewScopeKey = useMemo(() => {
     if (mediaType === 'audio') return 'audio';

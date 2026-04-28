@@ -156,13 +156,26 @@ export function useReaderWakeHandlers(
         return;
       }
 
-      // Skip fast-track when page-turn handlers are registered: the wake will
-      // trigger a page turn and finishEinkWork(true) → notifyInteractiveReady
-      // will fire after the page renders, which is the correct moment.
-      if (hasTurnHandlersRef.current) return;
-
       if (wakeReadyInFlightRef.current) return;
       wakeReadyInFlightRef.current = true;
+
+      if (hasTurnHandlersRef.current) {
+        // Page-turn handlers are registered: the wake command will trigger a
+        // page turn. Start critical work BEFORE calling notifyInteractiveReady
+        // so the EPD controller does not perform an intermediate hardware
+        // refresh of the old content while JS wires up the page turn.
+        // The page turn's own startEinkWork keeps critical work active during
+        // the turn; we end our guard tag immediately after the command is
+        // dispatched.
+        const guardTag = `hw-key-wake:${Date.now()}`;
+        einkPower.beginCriticalWork(guardTag);
+        void einkPower.notifyInteractiveReady()
+          .then(() => einkPower.endCriticalWork(guardTag))
+          .finally(() => {
+            if (!disposed) wakeReadyInFlightRef.current = false;
+          });
+        return;
+      }
 
       void einkPower.notifyInteractiveReady().finally(() => {
         if (!disposed) {

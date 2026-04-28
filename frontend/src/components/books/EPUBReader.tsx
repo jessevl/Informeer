@@ -78,7 +78,10 @@ function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
 }
 
-const EPUB_MIN_SPREAD_WIDTH_PX = 480;
+// Minimum viewport width to auto-enable spread (two-column) view.
+// 400px covers 7-inch eink tablets at typical DPI settings while excluding
+// most phones (360–393 px CSS width).
+const EPUB_MIN_SPREAD_WIDTH_PX = 400;
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;

@@ -255,10 +255,17 @@ public final class EinkPowerManager {
         }
 
         if (hibernating) {
-            // Resume synchronously (same path as touch wake) so the event falls
-            // through to the now-awake WebView with the same latency as a tap.
-            resumeWebViewImmediateLocked("hardware-key");
-            return false;
+            // Use the async wake-command path rather than transparent pass-through.
+            // Transparent pass-through causes the WebView to render one frame of the
+            // old page before JS handles the key, which the Boox EPD controller
+            // interprets as a "stable frame" and performs a full hardware refresh
+            // (showing the old content). Queuing the command and waking asynchronously
+            // lets JS call notifyInteractiveReady — which dispatches the command and
+            // starts the page turn — before the WebView has rendered any visible frame,
+            // so the EPD performs a single refresh that shows the new content directly.
+            queueWakeCommandLocked(command);
+            resumeWebViewLocked("hardware-key");
+            return true;
         }
 
         if (waitingForInteractiveReady) {
