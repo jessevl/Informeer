@@ -81,8 +81,9 @@ function saveTypographySettings(settings: TypographySettings) {
 // Minimum viewport width to auto-enable spread (two-column) view on first
 // load.  320px ensures any 7-inch tablet (even at high DPI) qualifies while
 // excluding very narrow phones (~320 px CSS width is the practical floor).
-// Note: we use spread:'always' (not 'auto') so epubjs never overrides our
-// decision based on its own internal 800 px minSpreadWidth default.
+// We also pass minSpreadWidth:1 alongside spread:'always' because epubjs
+// layout.js checks `width >= _minSpreadWidth` (default 800 px) even when
+// spread policy is 'always'.  Setting it to 1 removes that guard entirely.
 const EPUB_MIN_SPREAD_WIDTH_PX = 320;
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
@@ -689,12 +690,15 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         // Determine initial spread based on viewport
         const viewerEl = viewerRef.current!;
 
+        const wantSpread = manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible;
         const rendition = epub.renderTo(viewerEl, {
           width: '100%',
           height: '100%',
-          // 'always' bypasses epubjs's internal minSpreadWidth (default 800 px)
-          // which would prevent spread on any e-ink tablet-sized viewport.
-          spread: (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible) ? 'always' : 'none',
+          spread: wantSpread ? 'always' : 'none',
+          // minSpreadWidth:1 overrides epubjs's default 800 px guard in layout.js
+          // (`if (this._spread && width >= this._minSpreadWidth)`) so 'always'
+          // actually produces two columns on any viewport width.
+          minSpreadWidth: wantSpread ? 1 : 800,
           flow: 'paginated',
           allowScriptedContent: true,
         } as any);
@@ -1040,7 +1044,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   useEffect(() => {
     if (renditionRef.current) {
       startEinkWork('spread');
-      (renditionRef.current as any).spread(isSpreadView ? 'always' : 'none');
+      // Second arg overrides minSpreadWidth so the 800 px guard is bypassed.
+      (renditionRef.current as any).spread(isSpreadView ? 'always' : 'none', isSpreadView ? 1 : 800);
       queueRestoreToCfi();
     }
   }, [isSpreadView, queueRestoreToCfi, startEinkWork]);

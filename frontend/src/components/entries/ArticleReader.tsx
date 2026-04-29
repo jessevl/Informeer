@@ -11,7 +11,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { cn, stripHtml } from '@/lib/utils';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
-import { useIsMobile } from '@frameer/hooks/useMobileDetection';
+import { useIsMobile, useIsLandscapeOrientation } from '@frameer/hooks/useMobileDetection';
 import type { Entry } from '@/types/api';
 import { ArticleContent } from './ArticleContent';
 import { CommentsPanel } from './CommentsPanel';
@@ -74,6 +74,7 @@ export function ArticleReader({
 }: ArticleReaderProps) {
   const isUnread = entry.status === 'unread';
   const isMobile = useIsMobile();
+  const isLandscape = useIsLandscapeOrientation();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const einkMode = useSettingsStore((s) => s.einkMode);
   const articleTypography = useSettingsStore((s) => s.articleTypography);
@@ -358,7 +359,7 @@ export function ArticleReader({
     columnCount: articleTypography.columnCount,
     startEinkWork,
     finishEinkWork,
-    measureDeps: [isLoadingReader, isReaderView, readerContent, showComments, showTypography, modal, isOverlayReaderLayout],
+    measureDeps: [isLoadingReader, isReaderView, readerContent, showComments, showTypography, modal, isOverlayReaderLayout, isLandscape],
   });
 
   usePaginationWheel(scrollRef, handleNextPage, handlePrevPage, isPaginated);
