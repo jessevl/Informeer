@@ -178,7 +178,9 @@ export function TypographyPanel({
                   key={opt.value}
                   onClick={() => update({
                     readingMode: opt.value as TypographySettings['readingMode'],
-                    ...(opt.value === 'scroll' ? { columnCount: 1 as const } : { columnCount: 2 as const }),
+                    ...(opt.value === 'scroll'
+                      ? { columnCount: 1 as const }
+                      : { columnCount: settings.columnCount === 2 ? 2 as const : 1 as const }),
                   })}
                   className={cn(
                     'flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',

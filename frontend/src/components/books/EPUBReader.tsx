@@ -78,13 +78,9 @@ function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
 }
 
-// Minimum viewport width to auto-enable spread (two-column) view on first
-// load.  320px ensures any 7-inch tablet (even at high DPI) qualifies while
-// excluding very narrow phones (~320 px CSS width is the practical floor).
-// We also pass minSpreadWidth:1 alongside spread:'always' because epubjs
+// We pass minSpreadWidth:1 alongside spread:'always' because epubjs
 // layout.js checks `width >= _minSpreadWidth` (default 800 px) even when
-// spread policy is 'always'.  Setting it to 1 removes that guard entirely.
-const EPUB_MIN_SPREAD_WIDTH_PX = 320;
+// spread policy is 'always'. Setting it to 1 removes that guard entirely.
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
@@ -282,9 +278,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const isLandscapeViewport = viewerViewportSize.width > 0 && viewerViewportSize.height > 0
     ? viewerViewportSize.width > viewerViewportSize.height
     : isWindowLandscapeViewport;
-  // Enable spread view in landscape OR when the device is tablet-wide in portrait
-  // (width ≥ 600 CSS px covers most eink tablets but excludes phones ~360-430 px)
-  const isSpreadEligible = isLandscapeViewport || viewerViewportSize.width >= EPUB_MIN_SPREAD_WIDTH_PX;
+  // Auto-spread should follow orientation so rotating between portrait and
+  // landscape flips between single-page and spread layouts without needing the
+  // typography panel.
+  const isSpreadEligible = isLandscapeViewport;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(

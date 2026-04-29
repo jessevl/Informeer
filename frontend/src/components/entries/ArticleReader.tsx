@@ -896,8 +896,8 @@ export function ArticleReader({
               defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
               showMarginControls={false}
               showMaxWidthControl={true}
-              maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
-              paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns need more horizontal space.'}
+              maxPaginatedColumns={2}
+              paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
             />
           </>
         )}
@@ -1012,8 +1012,8 @@ export function ArticleReader({
                 defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
                 showMarginControls={false}
                 showMaxWidthControl={true}
-                maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
-                paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns need more horizontal space.'}
+                maxPaginatedColumns={2}
+                paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
               />
             </>
           )}
@@ -1182,8 +1182,8 @@ export function ArticleReader({
             defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
             showMarginControls={false}
             showMaxWidthControl={true}
-            maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
-            paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns need more horizontal space.'}
+            maxPaginatedColumns={2}
+            paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
           />
         </>
       )}

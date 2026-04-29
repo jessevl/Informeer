@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, type CSSProp
 import { einkPower } from '@/services/eink-power';
 
 const ARTICLE_PAGE_GAP_PX = 40;
-const MIN_PAGINATED_COLUMN_WIDTH_PX = 200;
+const RECOMMENDED_TWO_COLUMN_PAGE_WIDTH_PX = 200;
 const PAGINATION_SCROLL_ANIMATION_MS = 220;
 const PAGINATION_READY_FALLBACK_MS = 900;
 
@@ -106,8 +106,8 @@ export function useArticlePagination({
     return effectivePageWidth + ARTICLE_PAGE_GAP_PX;
   }, [pageWidth]);
 
-  const canUseTwoColumnLayout = pageWidth >= MIN_PAGINATED_COLUMN_WIDTH_PX * 2 + ARTICLE_PAGE_GAP_PX;
-  const effectiveColumnCount: 1 | 2 = isPaginated && columnCount === 2 && canUseTwoColumnLayout ? 2 : 1;
+  const canUseTwoColumnLayout = pageWidth >= RECOMMENDED_TWO_COLUMN_PAGE_WIDTH_PX * 2 + ARTICLE_PAGE_GAP_PX;
+  const effectiveColumnCount: 1 | 2 = isPaginated && columnCount === 2 ? 2 : 1;
 
   const getPageMetrics = useCallback((scroller: HTMLElement) => {
     const step = getPageStep(scroller);
