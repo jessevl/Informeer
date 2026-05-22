@@ -114,6 +114,7 @@ export function BooksView() {
     selectedBook,
     isReaderOpen,
     progressCache,
+    recentBookActivity,
     fetchBooks,
     uploadBook,
     deleteBook,
@@ -122,10 +123,10 @@ export function BooksView() {
   } = useBooksStore();
 
   // Sort & filter state
-  type SortMode = 'recent' | 'title' | 'author';
+  type SortMode = 'recent-activity' | 'recent-added' | 'title' | 'author';
   type FilterMode = 'all' | 'unfinished' | 'unread' | 'reading' | 'finished' | 'offline';
-  const [sortBy, setSortBy] = useState<SortMode>('recent');
-  const [filterBy, setFilterBy] = useState<FilterMode>('all');
+  const [sortBy, setSortBy] = useState<SortMode>('recent-activity');
+  const [filterBy, setFilterBy] = useState<FilterMode>('unfinished');
   const { effectiveOffline } = useEffectiveOfflineState();
   const effectiveFilterBy = effectiveOffline ? 'offline' : filterBy;
   const offlineRegistry = useOfflineRegistry();
@@ -172,6 +173,15 @@ export function BooksView() {
   const sortedFilteredBooks = useMemo(() => {
     let filtered = [...displayedBooks];
 
+    const getRecentActivityTime = (book: Book) => {
+      const localActivity = recentBookActivity[book.id];
+      const progressActivity = progressCache[book.id]?.updated_at || null;
+      return Math.max(
+        localActivity ? new Date(localActivity).getTime() : 0,
+        progressActivity ? new Date(progressActivity).getTime() : 0,
+      );
+    };
+
     // Filter
     if (effectiveFilterBy === 'unfinished') {
       filtered = filtered.filter(b => (progressCache[b.id]?.percentage || 0) < 1);
@@ -194,13 +204,18 @@ export function BooksView() {
       filtered.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === 'author') {
       filtered.sort((a, b) => (a.author || '').localeCompare(b.author || ''));
-    } else {
-      // recent: newest first by created_at
+    } else if (sortBy === 'recent-added') {
       filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else {
+      filtered.sort((a, b) => {
+        const activityDiff = getRecentActivityTime(b) - getRecentActivityTime(a);
+        if (activityDiff !== 0) return activityDiff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
     }
 
     return filtered;
-  }, [displayedBooks, progressCache, sortBy, effectiveFilterBy, offlineRegistry]);
+  }, [displayedBooks, progressCache, recentBookActivity, sortBy, effectiveFilterBy, offlineRegistry]);
   // Delete handler with confirmation
   const handleDelete = useCallback(async (book: { id: number; title: string }) => {
     if (!confirm(`Delete "${book.title}"?`)) return;
@@ -261,7 +276,8 @@ export function BooksView() {
                 {
                   icon: ArrowUpDown,
                   options: [
-                    { value: 'recent' as const, label: 'Recent' },
+                    { value: 'recent-activity' as const, label: 'Recently Read' },
+                    { value: 'recent-added' as const, label: 'Recently Added' },
                     { value: 'title' as const, label: 'Title' },
                     { value: 'author' as const, label: 'Author' },
                   ],

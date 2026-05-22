@@ -29,6 +29,7 @@ interface BooksState {
 
   // Progress cache
   progressCache: Record<number, BookProgress>;
+  recentBookActivity: Record<number, string>;
 
   // Actions
   fetchBooks: (search?: string) => Promise<void>;
@@ -69,6 +70,7 @@ export const useBooksStore = create<BooksState>()(
       currentChapter: '',
       highlights: [],
       progressCache: {},
+      recentBookActivity: {},
 
       fetchBooks: async (search?: string) => {
         if (!navigator.onLine && get().books.length > 0) {
@@ -107,12 +109,14 @@ export const useBooksStore = create<BooksState>()(
         await api.deleteBook(id);
         set(state => {
           const { [id]: _removed, ...remainingProgress } = state.progressCache;
+          const { [id]: _removedActivity, ...remainingActivity } = state.recentBookActivity;
           return {
             books: state.books.filter(b => b.id !== id),
             total: state.total - 1,
             selectedBook: state.selectedBook?.id === id ? null : state.selectedBook,
             isReaderOpen: state.selectedBook?.id === id ? false : state.isReaderOpen,
             progressCache: remainingProgress,
+            recentBookActivity: remainingActivity,
           };
         });
       },
@@ -128,12 +132,17 @@ export const useBooksStore = create<BooksState>()(
 
       openReader: (book: Book) => {
         const cached = get().progressCache[book.id];
+        const openedAt = new Date().toISOString();
         set({
           selectedBook: book,
           isReaderOpen: true,
           currentCfi: cached?.cfi || '',
           currentPercentage: cached?.percentage || 0,
           currentChapter: cached?.chapter || '',
+          recentBookActivity: {
+            ...get().recentBookActivity,
+            [book.id]: openedAt,
+          },
         });
         // Load progress from server
         get().loadProgress(book.id).catch(() => {});
@@ -150,6 +159,7 @@ export const useBooksStore = create<BooksState>()(
 
       updateProgress: (bookId, cfi, percentage, chapter) => {
         const normalizedPercentage = normalizeBookPercentage(percentage);
+        const updatedAt = new Date().toISOString();
 
         set(state => ({
           currentCfi: cfi,
@@ -161,14 +171,19 @@ export const useBooksStore = create<BooksState>()(
               cfi,
               percentage: normalizedPercentage,
               chapter,
-              updated_at: new Date().toISOString(),
+              updated_at: updatedAt,
             },
+          },
+          recentBookActivity: {
+            ...state.recentBookActivity,
+            [bookId]: updatedAt,
           },
         }));
       },
 
       markFinished: async (bookId: number) => {
         const existing = get().progressCache[bookId];
+        const updatedAt = new Date().toISOString();
 
         set(state => ({
           currentCfi: state.selectedBook?.id === bookId ? (existing?.cfi || state.currentCfi) : state.currentCfi,
@@ -180,8 +195,12 @@ export const useBooksStore = create<BooksState>()(
               cfi: existing?.cfi || '',
               percentage: 1,
               chapter: existing?.chapter || '',
-              updated_at: new Date().toISOString(),
+              updated_at: updatedAt,
             },
+          },
+          recentBookActivity: {
+            ...state.recentBookActivity,
+            [bookId]: updatedAt,
           },
         }));
 
@@ -319,6 +338,7 @@ export const useBooksStore = create<BooksState>()(
         books: state.books,
         total: state.total,
         progressCache: state.progressCache,
+        recentBookActivity: state.recentBookActivity,
       }),
     }
   )

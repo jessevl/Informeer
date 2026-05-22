@@ -47,6 +47,7 @@ import { getCachedBlob, getOfflineItem, removeOfflineItem, saveBookOffline, save
 import { useOfflineRegistry } from '@/stores/offline';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { EPUB_FONT_FACE_CSS, getEpubFontStack, normalizeEpubFontValue } from '@/lib/epub-fonts';
+import { deleteCachedEpubLocations, readCachedEpubLocations, writeCachedEpubLocations } from '@/lib/epub-locations-cache';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
 import { einkPower } from '@/services/eink-power';
 
@@ -84,6 +85,9 @@ function saveTypographySettings(settings: TypographySettings) {
 const EPUB_PAGE_TURN_GUARD_RESET_MS = 1500;
 const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
+const EPUB_RESTORE_GUARD_SCHEDULED_MS = 2000;
+const EPUB_RESTORE_GUARD_DISPLAYING_MS = 1000;
+const EPUB_LOCATION_BREAK_CHARS = 1600;
 
 function getEpubVerticalPaddingCss(
   baseMarginPx: number,
@@ -184,6 +188,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const currentBookDataRef = useRef<Uint8Array | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
   const manualSpreadPreferenceRef = useRef(false);
+  const restoreGuardRef = useRef<{
+    phase: 'idle' | 'scheduled' | 'displaying';
+    sequence: number;
+    timeoutId: ReturnType<typeof setTimeout> | null;
+  }>({ phase: 'idle', sequence: 0, timeoutId: null });
 
   const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `epub:${book.id}` });
 
@@ -317,13 +326,47 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   // --- Progress tracking for remote sync ---
   const chapterRef = useRef(initialProgress.chapter);
+  const progressPercentageRef = useRef(initialProgress.percentage);
   const [maxPercentage, setMaxPercentage] = useState(initialProgress.percentage);
   const [locationsReady, setLocationsReady] = useState(false);
+
+  const clearRestoreGuard = useCallback((sequence?: number) => {
+    const guard = restoreGuardRef.current;
+    if (sequence != null && guard.sequence !== sequence) return;
+
+    if (guard.timeoutId != null) {
+      clearTimeout(guard.timeoutId);
+    }
+
+    restoreGuardRef.current = {
+      phase: 'idle',
+      sequence: guard.sequence,
+      timeoutId: null,
+    };
+  }, []);
+
+  const setRestoreGuardPhase = useCallback((sequence: number, phase: 'scheduled' | 'displaying', timeoutMs: number) => {
+    const guard = restoreGuardRef.current;
+    if (guard.timeoutId != null) {
+      clearTimeout(guard.timeoutId);
+    }
+
+    restoreGuardRef.current = {
+      phase,
+      sequence,
+      timeoutId: setTimeout(() => {
+        clearRestoreGuard(sequence);
+      }, timeoutMs),
+    };
+  }, [clearRestoreGuard]);
 
   const queueRestoreToCfi = useCallback((cfi?: string | null) => {
     const rendition = renditionRef.current;
     const targetCfi = cfi ?? lastKnownCfiRef.current;
     if (!rendition || !targetCfi) return;
+
+    const restoreSequence = restoreGuardRef.current.sequence + 1;
+    setRestoreGuardPhase(restoreSequence, 'scheduled', EPUB_RESTORE_GUARD_SCHEDULED_MS);
 
     if (restoreFrameRef.current != null) {
       cancelAnimationFrame(restoreFrameRef.current);
@@ -333,11 +376,18 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     restoreFrameRef.current = requestAnimationFrame(() => {
       restoreFrameRef.current = requestAnimationFrame(() => {
         restoreFrameRef.current = null;
-        if (renditionRef.current !== rendition) return;
-        rendition.display(targetCfi).catch(() => {});
+        if (renditionRef.current !== rendition) {
+          clearRestoreGuard(restoreSequence);
+          return;
+        }
+
+        setRestoreGuardPhase(restoreSequence, 'displaying', EPUB_RESTORE_GUARD_DISPLAYING_MS);
+        rendition.display(targetCfi).catch(() => {
+          clearRestoreGuard(restoreSequence);
+        });
       });
     });
-  }, []);
+  }, [clearRestoreGuard, setRestoreGuardPhase]);
 
   const handleCloseInteraction = useCallback((event?: { preventDefault?: () => void; stopPropagation?: () => void; nativeEvent?: Event }) => {
     event?.preventDefault?.();
@@ -679,6 +729,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         const initialChapter = bestProgress?.chapter || '';
 
         lastKnownCfiRef.current = initialCfi;
+        progressPercentageRef.current = initialPercentage;
         setPercentage(initialPercentage);
         setMaxPercentage(prev => Math.max(prev, initialPercentage));
         setChapter(initialChapter);
@@ -716,6 +767,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           if (cancelled) return;
           setIsLoading(false);
 
+          const restoreGuard = restoreGuardRef.current;
+          const shouldSkipProgressPersistence = restoreGuard.phase !== 'idle';
+
           const cfi = location.start?.cfi || '';
           if (cfi) {
             lastKnownCfiRef.current = cfi;
@@ -726,6 +780,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           // Only update percentage display once locations are ready,
           // to avoid resetting the stored percentage to 0 on initial load
           if (locationsReadyRef.current) {
+            progressPercentageRef.current = pct;
             setPercentage(pct);
             setMaxPercentage(prev => Math.max(prev, pct));
           }
@@ -766,10 +821,25 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             }
           }
 
-          // Persist local position immediately so reopen/reflow restores exactly.
-          // Server sync is still debounced to avoid chatty writes while paging.
-          if (locationsReadyRef.current) {
-            updateProgress(book.id, cfi, pct, resolvedChapter);
+          if (restoreGuard.phase === 'displaying') {
+            clearRestoreGuard(restoreGuard.sequence);
+          }
+
+          // Persist the CFI immediately so reopen/sleep restore the exact spot
+          // even before location generation finishes. Percentage sync still waits
+          // for locations so we don't regress it to zero during startup.
+          if (!shouldSkipProgressPersistence && cfi) {
+            updateProgress(
+              book.id,
+              cfi,
+              locationsReadyRef.current ? pct : progressPercentageRef.current,
+              resolvedChapter,
+            );
+          }
+
+          // Server sync stays gated on locations because remote comparisons are
+          // percentage-based and would be noisy until locations are generated.
+          if (!shouldSkipProgressPersistence && locationsReadyRef.current) {
             if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
             progressTimerRef.current = setTimeout(() => {
               syncProgress(book.id).catch(() => {});
@@ -993,10 +1063,47 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           );
         });
 
-        // Generate locations for page numbers & percentages
-        epub.ready.then(() => epub.locations.generate(1600)).then(() => {
+        // Generate locations for page numbers & percentages, but reuse a
+        // persisted map when the same EPUB revision has already been indexed.
+        epub.ready.then(async () => {
+          let usedCachedLocations = false;
+          const cachedLocations = await readCachedEpubLocations(book, EPUB_LOCATION_BREAK_CHARS);
+
+          if (cachedLocations) {
+            try {
+              epub.locations.load(cachedLocations);
+              usedCachedLocations = true;
+            } catch {
+              await deleteCachedEpubLocations(book.id);
+            }
+          }
+
+          if (!usedCachedLocations) {
+            await epub.locations.generate(EPUB_LOCATION_BREAK_CHARS);
+            await writeCachedEpubLocations(book, EPUB_LOCATION_BREAK_CHARS, epub.locations.save());
+          }
+
+          if (cancelled) return;
+
           locationsReadyRef.current = true;
           setLocationsReady(true);
+
+          const currentCfi = lastKnownCfiRef.current;
+          const locations = epub.locations as any;
+          const totalLocs = locations?.total || 0;
+
+          if (currentCfi && totalLocs > 0) {
+            const currentLocIndex = Math.max(0, locations.locationFromCfi(currentCfi) || 0);
+            const computedPercentage = Math.min(Math.max(currentLocIndex / totalLocs, 0), 1);
+
+            progressPercentageRef.current = computedPercentage;
+            setPercentage(computedPercentage);
+            setMaxPercentage(prev => Math.max(prev, computedPercentage));
+            updateProgress(book.id, currentCfi, computedPercentage, chapterRef.current);
+          }
+        }).catch((error) => {
+          if (cancelled) return;
+          console.error('[epub] Failed to prepare locations:', error);
         });
 
         // Apply saved highlights
@@ -1026,6 +1133,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       cancelled = true;
       if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
       if (restoreFrameRef.current != null) cancelAnimationFrame(restoreFrameRef.current);
+      clearRestoreGuard();
       syncProgress(book.id).catch(() => {});
       void finishEinkWork(false);
       if (epubRef.current) epubRef.current.destroy();
