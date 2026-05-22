@@ -15,6 +15,8 @@ interface ProgressMarker {
 interface ReaderProgressBarProps {
   /** Current position (1-based page number, or any numeric position) */
   currentPosition: number;
+  /** Minimum position for the slider (defaults to 1). */
+  minPosition?: number;
   /** Total positions (total pages) */
   totalPositions: number;
   /** Label displayed left side (e.g. "Page 5" or "Ch. 3") */
@@ -37,6 +39,7 @@ interface ReaderProgressBarProps {
 
 export function ReaderProgressBar({
   currentPosition,
+  minPosition = 1,
   totalPositions,
   label,
   secondaryLabel,
@@ -75,7 +78,7 @@ export function ReaderProgressBar({
         <div className="relative flex-1">
           <input
             type="range"
-            min={1}
+            min={minPosition}
             max={totalPositions}
             value={currentPosition}
             onChange={(e) => onPositionChange(parseInt(e.target.value, 10))}
@@ -87,7 +90,7 @@ export function ReaderProgressBar({
           {highlightPosition != null && highlightPosition > 0 && highlightPosition < totalPositions && (
             <div
               className="absolute top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ left: `${((highlightPosition - 1) / (totalPositions - 1)) * 100}%` }}
+              style={{ left: `${((highlightPosition - minPosition) / Math.max(totalPositions - minPosition, 1)) * 100}%` }}
             >
               <div className="w-1.5 h-3 bg-[var(--color-accent)] rounded-full opacity-60 -translate-x-1/2" />
             </div>

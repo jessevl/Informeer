@@ -7,6 +7,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { X, RotateCcw, Type } from 'lucide-react';
 import { EPUB_FONT_OPTIONS } from '@/lib/epub-fonts';
@@ -34,6 +35,8 @@ interface TypographyPanelProps {
   showReadingModeControl?: boolean;
   /** Always show the Columns control even when readingMode is not 'paginated'. Default false. */
   alwaysShowColumns?: boolean;
+  /** Optional reader-specific status/details block shown near the preview. */
+  footerContent?: ReactNode;
 }
 
 export function TypographyPanel({
@@ -52,6 +55,7 @@ export function TypographyPanel({
   paginatedColumnHint,
   showReadingModeControl = true,
   alwaysShowColumns = false,
+  footerContent,
 }: TypographyPanelProps) {
   const update = (partial: Partial<TypographySettings>) => {
     onChange({ ...settings, ...partial, preset: 'custom' });
@@ -331,6 +335,8 @@ export function TypographyPanel({
         </div>
 
         {/* Preview indicator */}
+        {footerContent}
+
         <div className={cn(
           'p-3 rounded-lg text-xs leading-relaxed',
           'bg-[var(--color-surface-tertiary)] text-[var(--color-text-secondary)]',
