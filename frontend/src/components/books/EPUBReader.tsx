@@ -89,6 +89,24 @@ const EPUB_RESTORE_GUARD_SCHEDULED_MS = 2000;
 const EPUB_RESTORE_GUARD_DISPLAYING_MS = 1000;
 const EPUB_LOCATION_BREAK_CHARS = 1600;
 
+function getActiveRelocatedAnchor(location: any) {
+  const start = location?.start ?? null;
+  const end = location?.end ?? null;
+
+  const startLocation = typeof start?.location === 'number' ? start.location : null;
+  const endLocation = typeof end?.location === 'number' ? end.location : null;
+  const startDisplayedPage = typeof start?.displayed?.page === 'number' ? start.displayed.page : null;
+  const endDisplayedPage = typeof end?.displayed?.page === 'number' ? end.displayed.page : null;
+  const startPercentage = typeof start?.percentage === 'number' ? start.percentage : null;
+  const endPercentage = typeof end?.percentage === 'number' ? end.percentage : null;
+
+  const spansForward = (startLocation != null && endLocation != null && endLocation > startLocation)
+    || (startDisplayedPage != null && endDisplayedPage != null && endDisplayedPage > startDisplayedPage)
+    || (startPercentage != null && endPercentage != null && endPercentage > startPercentage);
+
+  return spansForward && end ? end : start;
+}
+
 function getEpubVerticalPaddingCss(
   baseMarginPx: number,
   inset: 'top' | 'bottom',
@@ -769,13 +787,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
           const restoreGuard = restoreGuardRef.current;
           const shouldSkipProgressPersistence = restoreGuard.phase !== 'idle';
+          const activeAnchor = getActiveRelocatedAnchor(location);
 
-          const cfi = location.start?.cfi || '';
+          const cfi = activeAnchor?.cfi || location.start?.cfi || '';
           if (cfi) {
             lastKnownCfiRef.current = cfi;
           }
           const pct = locationsReadyRef.current
-            ? (location.start?.percentage || 0)
+            ? (typeof activeAnchor?.percentage === 'number' ? activeAnchor.percentage : 0)
             : 0;
           // Only update percentage display once locations are ready,
           // to avoid resetting the stored percentage to 0 on initial load
@@ -787,18 +806,24 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
           // Overall page number from locations
           if (locationsReadyRef.current && epub.locations) {
-            const locIndex = (epub.locations as any).locationFromCfi(cfi);
-            const totalLocs = (epub.locations as any).total || 0;
-            setCurrentPageOverall(Math.max(0, locIndex));
-            setTotalPagesOverall(totalLocs);
+            const locationModel = epub.locations as any;
+            const locIndex = typeof activeAnchor?.location === 'number'
+              ? activeAnchor.location
+              : locationModel.locationFromCfi(cfi);
+            const totalLocs = locationModel.total || 0;
+            const currentLocationNumber = Math.max(1, (locIndex ?? 0) + 1);
+            const totalLocationCount = Math.max(1, totalLocs + 1);
+
+            setCurrentPageOverall(currentLocationNumber);
+            setTotalPagesOverall(totalLocationCount);
 
             // Reading time estimates
-            const locsLeft = Math.max(0, totalLocs - locIndex);
+            const locsLeft = Math.max(0, totalLocationCount - currentLocationNumber);
             const wordsLeft = locsLeft * WORDS_PER_LOCATION;
             setMinutesLeftBook(Math.ceil(wordsLeft / WORDS_PER_MINUTE));
 
-            if (location.start?.displayed?.total) {
-              const pagesLeftInChapter = location.start.displayed.total - location.start.displayed.page;
+            if (activeAnchor?.displayed?.total) {
+              const pagesLeftInChapter = activeAnchor.displayed.total - activeAnchor.displayed.page;
               const chapterWordsLeft = pagesLeftInChapter * WORDS_PER_LOCATION * 0.5;
               setMinutesLeftChapter(Math.ceil(chapterWordsLeft / WORDS_PER_MINUTE));
             }
@@ -806,8 +831,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
           // Chapter name — use href from current location for accurate matching
           let resolvedChapter = chapterRef.current;
-          if (location.start?.href) {
-            const locHref = location.start.href.split('#')[0];
+          if (activeAnchor?.href) {
+            const locHref = activeAnchor.href.split('#')[0];
             const navItem = epub.navigation?.toc?.find(
               (item: any) => {
                 const itemHref = item.href?.split('#')[0];
@@ -1095,10 +1120,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           if (currentCfi && totalLocs > 0) {
             const currentLocIndex = Math.max(0, locations.locationFromCfi(currentCfi) || 0);
             const computedPercentage = Math.min(Math.max(currentLocIndex / totalLocs, 0), 1);
+            const currentLocationNumber = currentLocIndex + 1;
+            const totalLocationCount = totalLocs + 1;
 
             progressPercentageRef.current = computedPercentage;
             setPercentage(computedPercentage);
             setMaxPercentage(prev => Math.max(prev, computedPercentage));
+            setCurrentPageOverall(currentLocationNumber);
+            setTotalPagesOverall(totalLocationCount);
             updateProgress(book.id, currentCfi, computedPercentage, chapterRef.current);
           }
         }).catch((error) => {
@@ -1199,7 +1228,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const handlePositionChange = useCallback((pos: number) => {
     if (!epubRef.current || !locationsReadyRef.current) return;
     const locations = epubRef.current.locations as any;
-    const cfi = locations.cfiFromLocation(pos);
+    const cfi = locations.cfiFromLocation(Math.max(0, pos - 1));
     if (cfi) {
       startEinkWork('seek');
       renditionRef.current?.display(cfi);
