@@ -87,7 +87,12 @@ const EPUB_CONTENT_TOP_CLEARANCE_PX = 24;
 const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
 const EPUB_RESTORE_GUARD_SCHEDULED_MS = 2000;
 const EPUB_RESTORE_GUARD_DISPLAYING_MS = 1000;
-const EPUB_LOCATION_BREAK_CHARS = 1600;
+// The locations map also drives the reader's overall "page" label and seek bar.
+// 1600 chars is too coarse on small page layouts and can make a single generated
+// location span multiple rendered pages, so use a denser grid now that locations
+// are cached client-side.
+const EPUB_LOCATION_BREAK_CHARS = 400;
+const EPUB_CHARS_PER_WORD_ESTIMATE = 1600 / 260;
 
 function getActiveRelocatedAnchor(location: any) {
   const start = location?.start ?? null;
@@ -487,7 +492,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // --- Reading time estimates ---
   const [minutesLeftChapter, setMinutesLeftChapter] = useState(0);
   const [minutesLeftBook, setMinutesLeftBook] = useState(0);
-  const WORDS_PER_LOCATION = 260;
+  const WORDS_PER_LOCATION = EPUB_LOCATION_BREAK_CHARS / EPUB_CHARS_PER_WORD_ESTIMATE;
   const WORDS_PER_MINUTE = 250;
 
   // --- Zoom (1x for EPUB — shared gestures need this) ---
