@@ -426,7 +426,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     };
   }, [clearRestoreGuard]);
 
-  const queueRestoreToCfi = useCallback((cfi?: string | null) => {
+  const queueRestoreToCfi = useCallback((cfi?: string | null, reason = 'unspecified') => {
     const rendition = renditionRef.current;
     const targetCfi = cfi ?? lastKnownCfiRef.current;
     if (!rendition || !targetCfi) return;
@@ -640,7 +640,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoNext, animatePageTurn, runRenditionPageTurn, startEinkWork, finishEinkWork]);
+  }, [canGoNext, animatePageTurn, finishEinkWork, runRenditionPageTurn, startEinkWork]);
 
   const prevPage = useCallback(() => {
     if (!renditionRef.current || !canGoPrev || isAnimatingRef.current) return;
@@ -658,7 +658,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       }
       setTimeout(() => { isAnimatingRef.current = false; }, 150);
     });
-  }, [canGoPrev, animatePageTurn, runRenditionPageTurn, startEinkWork, finishEinkWork]);
+  }, [canGoPrev, animatePageTurn, finishEinkWork, runRenditionPageTurn, startEinkWork]);
 
   // Instant variants for keyboard/hardware-button navigation — no animation delay.
   // Keyboard nav never has a visible slide (the user pressed a key, not swiped),
@@ -830,7 +830,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         // Read latest store progress (may include server data fetched by openReader)
         const storeProgress = useBooksStore.getState().progressCache[book.id] ?? null;
         const localProg = storeProgress ?? initialProgress;
-        const bestProgress = chooseInitialProgress(localProg, await remoteProgressPromise);
+        const remoteProgress = await remoteProgressPromise;
+        const bestProgress = chooseInitialProgress(localProg, remoteProgress);
         const initialCfi = bestProgress?.cfi || '';
         const initialPercentage = bestProgress?.percentage || 0;
         const initialChapter = bestProgress?.chapter || '';
@@ -1248,7 +1249,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       startEinkWork('spread');
       // Second arg overrides minSpreadWidth so the 800 px guard is bypassed.
       (renditionRef.current as any).spread(isSpreadView ? 'always' : 'none', isSpreadView ? 1 : 800);
-      queueRestoreToCfi();
+      queueRestoreToCfi(undefined, 'spread-change');
     }
   }, [isSpreadView, queueRestoreToCfi, startEinkWork]);
 
@@ -1258,7 +1259,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       startEinkWork('theme');
       const rendition = renditionRef.current;
       applyThemeAndTypography(rendition, readerTheme, typography);
-      queueRestoreToCfi();
+      queueRestoreToCfi(undefined, 'theme-or-typography-change');
     }
   }, [readerTheme, typography, queueRestoreToCfi, startEinkWork]);
 

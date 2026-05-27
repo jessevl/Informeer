@@ -379,9 +379,6 @@ books.put('/v1/books/:id/progress', async (c) => {
       updated_at = datetime('now')
   `, [user.id, bookId, nextCfi, nextPercentage, nextChapter]);
 
-  // Update book's updated_at timestamp
-  db.run("UPDATE books SET updated_at = datetime('now') WHERE id = ?", [bookId]);
-
   return c.json({ ok: true });
 });
 
