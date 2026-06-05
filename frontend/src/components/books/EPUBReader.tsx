@@ -218,13 +218,6 @@ function waitForReconnect(timeoutMs: number): Promise<boolean> {
   });
 }
 
-function getProgressTimestamp(progress?: { updated_at?: string | null } | null): number {
-  if (!progress?.updated_at) return 0;
-
-  const timestamp = new Date(progress.updated_at).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
 function chooseInitialProgress(
   local: { cfi?: string; percentage?: number; chapter?: string; updated_at?: string | null } | null,
   remote: { cfi?: string; percentage?: number; chapter?: string; updated_at?: string | null } | null,
@@ -235,7 +228,14 @@ function chooseInitialProgress(
   if (!localHasPosition) return remoteHasPosition ? remote : local;
   if (!remoteHasPosition) return local;
 
-  return getProgressTimestamp(remote) > getProgressTimestamp(local) ? remote : local;
+  // Prefer whichever position is further ahead. Timestamp comparison is
+  // unreliable: the server timestamp is written 1500ms+ after the client
+  // timestamp (sync debounce + latency), so a stale server page can appear
+  // "newer" than a fresh local page, causing a position regression on reopen.
+  // The 2% gap threshold avoids jitter from percentage rounding differences.
+  const localPct = local?.percentage ?? 0;
+  const remotePct = remote?.percentage ?? 0;
+  return (remotePct - localPct > 0.02) ? remote : local;
 }
 
 export function EPUBReader({ book, onClose }: EPUBReaderProps) {
@@ -305,52 +305,13 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   const offlineRegistry = useOfflineRegistry();
   const isWindowLandscapeViewport = useIsLandscapeViewport();
-  const [viewerViewportSize, setViewerViewportSize] = useState(() => ({
-    width: typeof window !== 'undefined' ? window.innerWidth : 0,
-    height: typeof window !== 'undefined' ? window.innerHeight : 0,
-  }));
 
-  useEffect(() => {
-    const updateViewportSize = () => {
-      const node = viewerRef.current ?? wrapperRef.current;
-      if (!node) {
-        setViewerViewportSize({
-          width: window.innerWidth,
-          height: window.innerHeight,
-        });
-        return;
-      }
-
-      setViewerViewportSize({
-        width: node.clientWidth,
-        height: node.clientHeight,
-      });
-    };
-
-    updateViewportSize();
-
-    const node = viewerRef.current ?? wrapperRef.current;
-    const resizeObserver = typeof ResizeObserver !== 'undefined' && node
-      ? new ResizeObserver(() => requestAnimationFrame(updateViewportSize))
-      : null;
-
-    if (node && resizeObserver) {
-      resizeObserver.observe(node);
-    }
-
-    window.addEventListener('resize', updateViewportSize);
-    window.addEventListener('orientationchange', updateViewportSize);
-
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updateViewportSize);
-      window.removeEventListener('orientationchange', updateViewportSize);
-    };
-  }, []);
-
-  const isLandscapeViewport = viewerViewportSize.width > 0 && viewerViewportSize.height > 0
-    ? viewerViewportSize.width > viewerViewportSize.height
-    : isWindowLandscapeViewport;
+  // Use window orientation (not the viewer div) for spread eligibility.
+  // The viewer div shrinks by ~52px when the toolbar is visible; on near-square
+  // screens that flips isSpreadEligible, which triggers spread/theme effects that
+  // activate the restore guard every time the toolbar auto-hides — silently
+  // discarding page-turn progress for the duration of every guard window.
+  const isLandscapeViewport = isWindowLandscapeViewport;
   // Auto-spread should follow orientation so rotating between portrait and
   // landscape flips between single-page and spread layouts without needing the
   // typography panel.
@@ -496,7 +457,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     if (!manualSpreadPreferenceRef.current) {
       const cols: 1 | 2 = isSpreadEligible ? 2 : 1;
       setIsSpreadView(isSpreadEligible);
-      setTypography(prev => ({ ...prev, columnCount: cols }));
+      // Only create a new object when columnCount actually changes — a new reference
+      // with the same value would trigger the theme effect and fire queueRestoreToCfi.
+      setTypography(prev => prev.columnCount === cols ? prev : { ...prev, columnCount: cols });
     }
   }, [isSpreadEligible]);
 

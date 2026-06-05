@@ -254,14 +254,21 @@ export const useBooksStore = create<BooksState>()(
               const local = state.progressCache[bookId];
               const isBookActive = state.selectedBook?.id === bookId;
 
-              // Compare timestamps: only adopt server position if it's actually newer
-              // than what we have locally (handles cross-device sync without
-              // overwriting progress that hasn't been pushed yet)
-              const serverTime = normalizedProgress.updated_at ? new Date(normalizedProgress.updated_at).getTime() : 0;
-              const localTime = local?.updated_at ? new Date(local.updated_at).getTime() : 0;
-              const serverIsNewer = serverTime > localTime;
+              // Prefer whichever position is further ahead. Timestamp comparison is
+              // unreliable here: the server timestamp is always written 1500ms+ after
+              // the client timestamp (sync debounce + network latency), so a stale
+              // server page can appear "newer" than a fresh local page.
+              // The 2% threshold matches the remote sync hook and avoids noise from
+              // percentage rounding differences. Cross-device advancement beyond this
+              // gap is still caught here; live cross-device sync is handled separately
+              // by useRemoteProgressSync (which shows a confirmation toast).
+              const localPct = local?.percentage ?? 0;
+              const serverPct = normalizedProgress.percentage;
+              const serverIsMateriallyAhead = serverPct - localPct > 0.02;
+              const localHasNoPosition = !local?.cfi;
+              const serverShouldWin = localHasNoPosition || serverIsMateriallyAhead;
 
-              if (serverIsNewer) {
+              if (serverShouldWin) {
                 return {
                   currentCfi: isBookActive ? normalizedProgress.cfi : state.currentCfi,
                   currentPercentage: isBookActive ? normalizedProgress.percentage : state.currentPercentage,
@@ -273,8 +280,6 @@ export const useBooksStore = create<BooksState>()(
                 };
               }
 
-              // Local is newer or same — don't overwrite, but still cache
-              // the server data for the remote sync hook to detect
               return {};
             });
           }
