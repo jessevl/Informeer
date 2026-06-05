@@ -216,7 +216,8 @@ export function AppLayout({
 
   // Calculated widths
   const effectiveSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
-  const effectiveSidebarReserveWidth = effectiveSidebarWidth + FLOATING_PANEL_GUTTER;
+  // Sidebar sits at left=FLOATING_PANEL_GUTTER; reserve = left inset + sidebar width + right gap
+  const effectiveSidebarReserveWidth = effectiveSidebarWidth + FLOATING_PANEL_GUTTER * 2;
   // For magazine/audio/video views, list takes full width (no reader panel)
   const isMagazineView = viewMode === 'magazine';
   const isFullWidthView = isMagazineView || mediaType === 'audio' || mediaType === 'video' || mediaType === 'magazines' || mediaType === 'books';
@@ -327,60 +328,44 @@ export function AppLayout({
         style={{
           '--app-header-offset': '3.5rem',
           '--app-navbar-offset': 'calc(max(var(--safe-area-bottom), 0px) + 1rem)',
-          paddingTop: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-top))`,
-          paddingBottom: `${FLOATING_PANEL_GUTTER}px`,
-          paddingLeft: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-left))`,
-          paddingRight: `max(${FLOATING_PANEL_GUTTER}px, env(safe-area-inset-right))`,
         } as CSSProperties}
       >
-      {/* Sidebar Panel - Recessed behind paper surface, full height */}
-      {/* Also hidden when fullscreen magazine viewer is open (e.g. iPad landscape) */}
-      {!isFullscreenReaderOpen && (
-        <div 
-          className={cn(
-            'relative flex-shrink-0 sidebar-recessed transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
-            sidebarCollapsed ? 'z-20' : 'z-0'
-          )}
-          style={{ width: effectiveSidebarReserveWidth }}
-        >
+      {/* Paper Surface - Full viewport, sidebar floats inside as absolute overlay */}
+      <div className="flex-1 flex flex-col min-w-0 relative z-10 h-full overflow-hidden">
+        {/* Sidebar - Absolute overlay with left margin so it floats inside the paper surface */}
+        {!isFullscreenReaderOpen && (
           <div
-            className={cn(
-              'h-full rounded-[26px] border border-[var(--color-border-default)]',
-              'bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)]',
-              'shadow-[0_20px_70px_-34px_rgba(15,23,42,0.42)]',
-              'backdrop-blur-xl',
-              'eink-shell-surface',
-              'transition-[width,box-shadow,opacity,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
-              sidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'
-            )}
-            style={{ width: effectiveSidebarWidth }}
+            className="absolute z-20 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{ left: FLOATING_PANEL_GUTTER, top: FLOATING_PANEL_GUTTER, bottom: FLOATING_PANEL_GUTTER, width: effectiveSidebarWidth }}
           >
-            {sidebar}
-          </div>
-          
-          {/* Sidebar Resize Handle */}
-          {!sidebarCollapsed && (
-            <ResizeHandle
-              onMouseDown={handleSidebarResizeStart}
-              className="right-0"
-            />
-          )}
-        </div>
-      )}
+            <div
+              className={cn(
+                'h-full w-full rounded-[26px] shell-surface shell-surface-blur eink-shell-surface',
+                'transition-[opacity,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                sidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'
+              )}
+            >
+              {sidebar}
+            </div>
 
-      {/* Paper Surface - Elevated content area */}
-      <div className={cn(
-        "flex-1 flex flex-col min-w-0 relative z-10 h-full",
-        "overflow-hidden rounded-[26px] border border-[var(--color-border-default)]",
-        "bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)]",
-        "shadow-[0_20px_70px_-34px_rgba(15,23,42,0.42)]",
-        'eink-shell-surface'
-      )}>
-        {/* Content Area - Full height since header floats */}
-        <div className="flex-1 flex min-h-0 min-w-0">
+            {/* Sidebar Resize Handle */}
+            {!sidebarCollapsed && (
+              <ResizeHandle
+                onMouseDown={handleSidebarResizeStart}
+                className="right-0"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Content Area - offset by sidebar reserve width; single background fills gap + list area */}
+        <div
+          className="flex-1 flex min-h-0 min-w-0 bg-[var(--color-surface-secondary)] transition-[padding-left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+          style={{ paddingLeft: effectiveSidebarReserveWidth }}
+        >
           {/* Entry List Panel - Slightly darker background */}
           {/* In magazine view, this takes full width */}
-          <div 
+          <div
             className={cn(
               "relative h-full min-w-0",
               isFullWidthView ? "flex-1" : "flex-shrink-0"
@@ -398,14 +383,11 @@ export function AppLayout({
               isRefreshing={isRefreshing}
               headerActions={headerActions}
             />
-            
+
             <div className={cn(
               'h-full overflow-hidden',
-              'bg-[var(--color-surface-secondary)]',
               // Only show right border when reader is present (non-full-width views)
               reader && !isFullWidthView ? 'border-r border-[var(--color-border-subtle)]' : '',
-              // Round left corners when sidebar is collapsed
-              sidebarCollapsed && 'rounded-tl-[12px]'
             )}>
               <ViewTransition transitionKey={headerTitle || 'home'}>
                 {list}
@@ -431,7 +413,7 @@ export function AppLayout({
 
           {/* Expand to fill when no reader (non-full-width views only) */}
           {!reader && !isFullWidthView && (
-            <div className="flex-1 h-full min-w-0 bg-[var(--color-surface-primary)]" />
+            <div className="flex-1 h-full min-w-0" />
           )}
         </div>
       </div>

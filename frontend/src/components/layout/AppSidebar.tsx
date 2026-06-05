@@ -422,7 +422,7 @@ function ExpandedSidebarContent({
     <div className="flex flex-col h-full">
       {/* ── Header: collapse + pin ── */}
       {showPanelControls && (
-        <div className="px-1 pb-2 pt-3 flex-shrink-0">
+        <div className="px-2 pb-2 pt-2 flex-shrink-0">
           <div className="flex items-center justify-between gap-2">
             {onToggleCollapse ? (
               <button
@@ -455,7 +455,7 @@ function ExpandedSidebarContent({
 
       {/* ── Search ── */}
       {onOpenSearch && (
-        <div className="px-1.5 pt-1 pb-1.5 flex-shrink-0">
+        <div className="px-2 pt-1 pb-1.5 flex-shrink-0">
           <button
             onClick={onOpenSearch}
             className="eink-shell-surface w-full flex items-center gap-3 px-3 py-1.5 rounded-xl border border-[var(--color-border-default)]/80 bg-[color-mix(in_srgb,var(--color-surface-primary)_78%,transparent)] text-sm text-[var(--color-text-tertiary)] shadow-[0_14px_30px_-28px_rgba(15,23,42,0.35)] backdrop-blur-sm hover:border-[var(--color-border-emphasis)] hover:bg-[color-mix(in_srgb,var(--color-surface-secondary)_82%,transparent)] transition-all"
@@ -470,7 +470,7 @@ function ExpandedSidebarContent({
       )}
 
       {/* ── Main Navigation — 2-column tile grid ── */}
-      <div className="px-1.5 pb-2 flex-shrink-0">
+      <div className="px-2 pb-2 flex-shrink-0">
         <MainNavTiles
           currentView={currentView}
           isViewActive={isViewActive}
@@ -540,7 +540,7 @@ function ExpandedSidebarContent({
       </nav>
 
       {/* ── Bottom: app context menu (settings + offline) ── */}
-      <div className="px-1.5 pb-3 pt-2 flex-shrink-0 border-t border-[var(--color-border-subtle)]">
+      <div className="px-2 pb-3 pt-2 flex-shrink-0 border-t border-[var(--color-border-subtle)]">
         <SidebarBottomMenu
           offlineMode={offlineMode}
           onToggleOffline={async () => {
