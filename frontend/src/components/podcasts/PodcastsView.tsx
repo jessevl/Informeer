@@ -438,7 +438,7 @@ export function PodcastsView({
       {/* Main Content Area */}
       <div
         ref={scrollRef}
-        className="flex flex-1 min-h-0 flex-col overflow-y-auto overflow-x-hidden content-below-header content-above-navbar"
+        className="flex flex-1 min-h-0 flex-col overflow-y-auto overflow-x-hidden content-below-header"
         style={{
           transform: pullDistance > 0 ? `translateY(${pullDistance}px)` : undefined,
           transition: isPulling ? 'none' : 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -556,7 +556,7 @@ export function PodcastsView({
               <p className="text-sm">No podcast shows loaded yet</p>
             </div>
           ) : (
-            <div ref={showsOverviewRef} className="flex-1 min-h-0 overflow-y-auto">
+            <div ref={showsOverviewRef} className="flex-1 min-h-0 overflow-y-auto content-above-navbar">
               <div
                 className={cn(
                   'grid gap-x-4 gap-y-4 p-4',
@@ -593,7 +593,7 @@ export function PodcastsView({
                 </p>
               </div>
             ) : (
-              <div ref={savedOverviewRef} className="flex-1 min-h-0 overflow-y-auto">
+              <div ref={savedOverviewRef} className="flex-1 min-h-0 overflow-y-auto content-above-navbar">
                 <div className="space-y-1 pb-10">
                   {visibleSavedEpisodes.map(entry => (
                     <EpisodeCard

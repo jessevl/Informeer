@@ -268,7 +268,7 @@ export function BooksView() {
         )}
 
         {/* Content */}
-        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header content-above-navbar">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header">
           {/* Sort/Filter bar — only shown when there are books */}
           {displayedBooks.length > 0 && (
             <FilterBar
@@ -332,7 +332,7 @@ export function BooksView() {
               )}
             </div>
           ) : (
-            <div ref={overviewRef} className="flex-1 min-h-0 overflow-y-auto">
+            <div ref={overviewRef} className="flex-1 min-h-0 overflow-y-auto content-above-navbar">
               <BookGrid
                 books={sortedFilteredBooks}
                 progressCache={progressCache}

@@ -479,7 +479,7 @@ export function MagazinesView({
     <>
       <div className="flex flex-col h-full relative">
         {/* Stack grid view — always visible */}
-        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header content-above-navbar">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header">
           {magazineFeeds.length === 0 && !isLoadingSubscriptions ? (
             // Empty state
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-tertiary)] p-8">
@@ -535,7 +535,7 @@ export function MagazinesView({
                   }]}
                 />
               )}
-              <div className="flex-1 min-h-0 overflow-y-auto">
+              <div className="flex-1 min-h-0 overflow-y-auto content-above-navbar">
                 <div
                   ref={gridRef}
                   className={cn(

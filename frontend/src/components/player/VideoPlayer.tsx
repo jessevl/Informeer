@@ -110,6 +110,10 @@ export function VideoPlayer() {
   // Check if playing YouTube content - declare early for use in effects
   const isYouTube = !!currentYouTubeId;
 
+  // True whenever the full-video overlay (not the mini player) is active.
+  // Controls should auto-hide in this state while playing.
+  const isExpandedView = expanded || isFullscreen || isYouTube || playerSize === 'theater';
+
   // Capture the YouTube start time when the video changes
   // This needs to be done immediately when the YouTube ID changes
   useEffect(() => {
@@ -126,12 +130,22 @@ export function VideoPlayer() {
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    if (expanded && isPlaying) {
+    if (isExpandedView && isPlaying) {
       controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
       }, 3000);
     }
-  }, [expanded, isPlaying]);
+  }, [isExpandedView, isPlaying]);
+
+  // Auto-hide controls when playback starts; always show when paused
+  useEffect(() => {
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    if (isPlaying && isExpandedView) {
+      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
+    } else {
+      setShowControls(true);
+    }
+  }, [isPlaying, isExpandedView]);
 
   // Sync video element with store state
   useEffect(() => {
@@ -202,14 +216,18 @@ export function VideoPlayer() {
     };
   }, [setPiP, isYouTube, playerReady]);
 
-  // Handle fullscreen events
+  // Handle fullscreen events (webkit prefix for iOS Safari)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setFullscreen(!!document.fullscreenElement);
+      setFullscreen(!!(document.fullscreenElement || (document as any).webkitFullscreenElement));
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
   }, [setFullscreen]);
 
   // Sync on unmount
@@ -323,11 +341,21 @@ export function VideoPlayer() {
     const container = containerRef.current;
     if (!container) return;
 
+    const isInFullscreen = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
+      if (isInFullscreen) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        }
+      } else if (container.requestFullscreen) {
         await container.requestFullscreen();
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if (playerRef.current && (playerRef.current as any).webkitEnterFullscreen) {
+        // iOS Safari: only <video> elements support fullscreen
+        (playerRef.current as any).webkitEnterFullscreen();
       }
     } catch (error) {
       console.error('Fullscreen error:', error);
@@ -421,34 +449,36 @@ export function VideoPlayer() {
 
   return (
     <>
-      {/* Theater mode backdrop */}
+      {/* Theater mode backdrop — visual only, click handled by container */}
       {playerSize === 'theater' && !isFullscreen && (
-        <div 
-          className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm animate-backdrop-in"
-          onClick={() => setPlayerSize('normal')}
-        />
+        <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm animate-backdrop-in pointer-events-none" />
       )}
       
-      <div 
+      <div
         ref={containerRef}
         className={cn(
           'fixed z-50 animate-player-enter',
           'transition-all duration-500 transition-snappy',
           getPlayerSizeClass()
         )}
+        style={!showControls && isFullscreen ? { cursor: 'none' } : undefined}
         onMouseMove={showControlsTemporarily}
         onMouseEnter={showControlsTemporarily}
+        onClick={playerSize === 'theater' && !isFullscreen ? () => { setExpanded(false); setPlayerSize('mini'); } : undefined}
       >
         {/* Player Card */}
-        <div className={cn(
-          'relative overflow-hidden',
-          'transition-all duration-500 transition-snappy',
-          isFullscreen 
-            ? 'w-full h-full bg-black' 
-            : playerSize === 'theater'
-              ? 'w-full max-w-[min(1400px,calc(100vw-4rem))] aspect-video rounded-2xl bg-black shadow-2xl'
-              : 'rounded-3xl bg-[var(--color-surface-base)]/95 backdrop-blur-xl border border-[var(--color-border-subtle)] shadow-2xl shadow-black/20 dark:shadow-black/40'
-        )}>
+        <div
+          className={cn(
+            'relative overflow-hidden',
+            'transition-all duration-500 transition-snappy',
+            isFullscreen
+              ? 'w-full h-full bg-black'
+              : playerSize === 'theater'
+                ? 'w-full max-w-[min(1400px,calc(100vw-4rem))] aspect-video rounded-2xl bg-black shadow-2xl'
+                : 'rounded-3xl bg-[var(--color-surface-base)]/95 backdrop-blur-xl border border-[var(--color-border-subtle)] shadow-2xl shadow-black/20 dark:shadow-black/40'
+          )}
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Compact Mini Player - Not for YouTube (YouTube always expanded) */}
           {!expanded && !isFullscreen && !isYouTube && playerSize !== 'theater' && (
             <div className="p-3 animate-fade-in">

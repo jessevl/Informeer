@@ -73,10 +73,12 @@ function VideoCollection({
   entries,
   viewMode,
   onSelectEntry,
+  className,
 }: {
   entries: Entry[];
   viewMode: ViewMode;
   onSelectEntry: (entry: Entry) => void;
+  className?: string;
 }) {
   const { isEntryWatched } = useVideoStore();
   const gridColumns = useVideoGridColumns();
@@ -103,7 +105,7 @@ function VideoCollection({
     </div>
   );
 
-  return <div className="h-full min-h-0 overflow-y-auto">{content}</div>;
+  return <div className={cn("h-full min-h-0 overflow-y-auto", className)}>{content}</div>;
 }
 
 // Video Card Component
@@ -492,11 +494,12 @@ function ChannelDetail({
       </div>
 
       {/* Videos */}
-      <div className="flex-1 min-h-0 content-below-header content-above-navbar">
+      <div className="flex-1 min-h-0">
         <VideoCollection
           entries={videoEntries}
           viewMode={viewMode}
           onSelectEntry={onSelectEntry}
+          className="content-below-header content-above-navbar"
         />
       </div>
     </div>
@@ -598,11 +601,12 @@ export function VideosView({
 
   return (
     <div className="flex flex-col h-full relative">
-      <div className="flex-1 min-h-0 content-below-header content-above-navbar">
+      <div className="flex-1 min-h-0">
         <VideoCollection
           entries={recentVideos}
           viewMode={viewMode}
           onSelectEntry={onSelectEntry}
+          className="content-below-header content-above-navbar"
         />
       </div>
     </div>

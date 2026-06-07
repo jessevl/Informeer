@@ -64,12 +64,12 @@ export interface ReaderGestureState {
   zoomTargetRef: React.RefObject<HTMLDivElement>;
   /**
    * Call this after the consumer has fully repainted the content at the new
-   * scale (i.e. after the PDF canvas re-render is complete). It clears the
-   * live CSS zoom transform on zoomTargetRef so the corrective scale() is
-   * removed exactly when the canvas shows the right pixels — eliminating the
-   * white flash that would occur if it were cleared too early.
+   * scale (i.e. after the PDF canvas re-render is complete). Clears the live
+   * CSS zoom transform on zoomTargetRef and calls `onCommit` synchronously,
+   * or defers both until the double-tap animation finishes so there is no
+   * intermediate wrong-scale frame.
    */
-  notifyRenderComplete: () => void;
+  notifyRenderComplete: (onCommit: () => void) => void;
 }
 
 export function useReaderGestures(
@@ -186,6 +186,11 @@ export function useReaderGestures(
   const pinchDistRef = useRef<number | null>(null);
   const pinchScaleRef = useRef(1);
 
+  // Double-tap animation refs
+  const DOUBLE_TAP_ANIM_MS = 250;
+  const doubleTapAnimEndRef = useRef(0);
+  const doubleTapAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const resetPan = useCallback(() => {
     setPanOffset({ x: 0, y: 0 });
     panOffsetRef.current = { x: 0, y: 0 };
@@ -237,50 +242,44 @@ export function useReaderGestures(
 
   // ---------- Double-tap to zoom ----------
 
-  /**
-   * Double-tap zoom levels (cycles through):
-   * - From scale=1: zoom to 2.5× (comfortable reading zoom for text)
-   * - From scale≈2.5: zoom to 4× (close-up for fine detail)
-   * - From scale>2.5 or scale≈4: reset to 1× (fit page)
-   *
-   * Centers the zoom on the tap point so the tapped content stays
-   * under the finger after zooming.
-   */
   const handleDoubleTap = useCallback((clientX: number, clientY: number) => {
     if (!enableZoom) return;
 
     const container = containerRef.current;
     if (!container) return;
 
+    // Cancel any pending double-tap animation commit
+    if (doubleTapAnimTimerRef.current) {
+      clearTimeout(doubleTapAnimTimerRef.current);
+      doubleTapAnimTimerRef.current = null;
+    }
+
     const rect = container.getBoundingClientRect();
-    // Tap position relative to container center (normalized -0.5..0.5)
     const relX = (clientX - rect.left) / rect.width - 0.5;
     const relY = (clientY - rect.top) / rect.height - 0.5;
 
     const current = scaleRef.current;
-    let newScale: number;
+    // Toggle: zoomed-in → back to fit; at fit → zoom to 2.5×
+    const newScale = current > 1.2 ? 1 : 2.5;
 
-    if (current < 1.5) {
-      // At ~1×: zoom to 2.5× for comfortable text reading
-      newScale = 2.5;
-    } else if (current < 3.5) {
-      // At ~2.5×: zoom to 4× for fine detail
-      newScale = Math.min(4, maxScale);
-    } else {
-      // At 4× or above: reset to 1×
-      newScale = 1;
-    }
+    const el = zoomTargetRef.current;
 
     if (newScale <= 1) {
-      // Reset: go to 1× with no pan
-      scaleRef.current = 1;
-      liveScaleRef.current = 1;
+      // Zoom-out: zero pan first so the animation scales toward the center
       panOffsetRef.current = { x: 0, y: 0 };
       setPanOffset({ x: 0, y: 0 });
-      commitScale();
+      liveScaleRef.current = 1;
+      scaleRef.current = 1;
+      if (el) el.style.transition = `transform ${DOUBLE_TAP_ANIM_MS}ms ease-out`;
+      scheduleZoomUpdate();
+      doubleTapAnimEndRef.current = Date.now() + DOUBLE_TAP_ANIM_MS;
+      doubleTapAnimTimerRef.current = setTimeout(() => {
+        doubleTapAnimTimerRef.current = null;
+        if (el) el.style.transition = '';
+        commitScale();
+      }, DOUBLE_TAP_ANIM_MS);
     } else {
-      // Zoom in: center on tap point
-      // The pan offset should place the tapped point at the same screen position
+      // Zoom-in: center on tap point, animate scale up
       const scaleRatio = newScale / current;
       const prevPan = panOffsetRef.current;
       const newPan = clampPan(
@@ -288,14 +287,20 @@ export function useReaderGestures(
         prevPan.y * scaleRatio - relY * rect.height * (scaleRatio - 1),
         newScale,
       );
-
-      scaleRef.current = newScale;
       liveScaleRef.current = newScale;
-      panOffsetRef.current = newPan;
-      setPanOffset(newPan);
-      commitScale();
+      scaleRef.current = newScale;
+      if (el) el.style.transition = `transform ${DOUBLE_TAP_ANIM_MS}ms ease-out`;
+      scheduleZoomUpdate();
+      doubleTapAnimEndRef.current = Date.now() + DOUBLE_TAP_ANIM_MS;
+      doubleTapAnimTimerRef.current = setTimeout(() => {
+        doubleTapAnimTimerRef.current = null;
+        if (el) el.style.transition = '';
+        panOffsetRef.current = newPan;
+        setPanOffset(newPan);
+        commitScale();
+      }, DOUBLE_TAP_ANIM_MS);
     }
-  }, [enableZoom, maxScale, commitScale]);
+  }, [enableZoom, clampPan, commitScale, scheduleZoomUpdate]);
 
   // ---------- React touch handlers (single-finger) ----------
 
@@ -406,6 +411,14 @@ export function useReaderGestures(
 
       if (isPinch && enableZoom) {
         e.preventDefault();
+        // Cancel any in-progress double-tap animation
+        if (doubleTapAnimTimerRef.current) {
+          clearTimeout(doubleTapAnimTimerRef.current);
+          doubleTapAnimTimerRef.current = null;
+          doubleTapAnimEndRef.current = 0;
+          const animEl = zoomTargetRef.current;
+          if (animEl) animEl.style.transition = '';
+        }
         const delta = -e.deltaY * 0.01;
         const oldLive = liveScaleRef.current;
         const newLive = Math.min(Math.max(oldLive + delta, 1), maxScale);
@@ -472,6 +485,14 @@ export function useReaderGestures(
 
     function handleTouchStartPinch(e: TouchEvent) {
       if (e.touches.length === 2) {
+        // Cancel any in-progress double-tap animation
+        if (doubleTapAnimTimerRef.current) {
+          clearTimeout(doubleTapAnimTimerRef.current);
+          doubleTapAnimTimerRef.current = null;
+          doubleTapAnimEndRef.current = 0;
+          const animEl = zoomTargetRef.current;
+          if (animEl) animEl.style.transition = '';
+        }
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         pinchDistRef.current = Math.hypot(dx, dy);
@@ -595,6 +616,7 @@ export function useReaderGestures(
       if (scrollAccumRef.current.timer) clearTimeout(scrollAccumRef.current.timer);
       if (zoomRafRef.current !== null) cancelAnimationFrame(zoomRafRef.current);
       if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);
+      if (doubleTapAnimTimerRef.current) clearTimeout(doubleTapAnimTimerRef.current);
     };
   }, [enableZoom, maxScale, setScale, scheduleZoomUpdate, commitScale]);
 
@@ -617,11 +639,23 @@ export function useReaderGestures(
     else callbacksRef.current.onToggleControls?.();
   }, [enableClickZones]);
 
-  const notifyRenderComplete = useCallback(() => {
-    if (Math.abs(liveScaleRef.current - committedScaleRef.current) < 0.001) return;
-    committedScaleRef.current = liveScaleRef.current;
-    const el = zoomTargetRef.current;
-    if (el) el.style.transform = '';
+  const notifyRenderComplete = useCallback((onCommit: () => void) => {
+    const apply = () => {
+      if (Math.abs(liveScaleRef.current - committedScaleRef.current) > 0.001) {
+        committedScaleRef.current = liveScaleRef.current;
+        const el = zoomTargetRef.current;
+        if (el) el.style.transform = '';
+      }
+      onCommit();
+    };
+    // If a double-tap animation is still playing, defer until it finishes so
+    // the canvas blit and CSS transform clear don't happen mid-animation.
+    const remaining = doubleTapAnimEndRef.current - Date.now();
+    if (remaining > 5) {
+      setTimeout(apply, remaining);
+    } else {
+      apply();
+    }
   }, []);
 
   return {

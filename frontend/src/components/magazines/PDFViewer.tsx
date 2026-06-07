@@ -226,7 +226,7 @@ export function PDFViewer({
 
   // Stable ref so renderPages (defined before gestures) can clear the live CSS
   // zoom transform on zoomTargetRef exactly after the canvas has repainted.
-  const notifyRenderCompleteRef = useRef<() => void>(() => {});
+  const notifyRenderCompleteRef = useRef<(onCommit: () => void) => void>((onCommit) => onCommit());
 
   const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `pdf:${entryId || 'inline'}` });
 
@@ -702,18 +702,20 @@ export function PDFViewer({
 
       if (renderCycle !== renderCycleRef.current) return;
 
-      // Atomically: clear the CSS zoom transform + blit all rendered frames to
-      // their visible canvases in one synchronous block. The browser cannot
-      // paint between these statements, so there is no intermediate blank or
-      // wrong-scale frame.
-      notifyRenderCompleteRef.current();
-      leftCommit();
-      if (rightCommit) {
-        rightCommit();
-        canvasRightRef.current!.style.display = 'block';
-      } else if (canvasRightRef.current) {
-        canvasRightRef.current.style.display = 'none';
-      }
+      // Clear the CSS zoom transform and blit all rendered frames to their
+      // visible canvases. If a double-tap animation is still playing the gesture
+      // hook defers this callback until the animation finishes, so the canvas
+      // swap and transform clear always happen in the same synchronous block.
+      const canvasRight = canvasRightRef.current;
+      notifyRenderCompleteRef.current(() => {
+        leftCommit();
+        if (rightCommit) {
+          rightCommit();
+          if (canvasRight) canvasRight.style.display = 'block';
+        } else if (canvasRight) {
+          canvasRight.style.display = 'none';
+        }
+      });
 
       await waitForCanvasCommit();
       if (renderCycle !== renderCycleRef.current) return;
