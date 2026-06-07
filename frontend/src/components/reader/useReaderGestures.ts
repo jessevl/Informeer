@@ -192,6 +192,43 @@ export function useReaderGestures(
     panOffsetRef.current = { x: 0, y: 0 };
   }, []);
 
+  /**
+   * Clamp a pan offset so the page can't be dragged past its boundaries.
+   * Uses the zoom target's rendered dimensions to compute precise bounds.
+   * `targetScale` is the scale the bounds should be computed for (may differ
+   * from committedScaleRef during a live pinch gesture).
+   */
+  const clampPan = useCallback((x: number, y: number, targetScale: number): { x: number; y: number } => {
+    if (targetScale <= 1) return { x: 0, y: 0 };
+    const container = containerRef.current;
+    if (!container) return { x, y };
+
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const target = zoomTargetRef.current;
+
+    let maxX: number;
+    let maxY: number;
+
+    if (target && committedScaleRef.current > 0) {
+      // scrollWidth/Height reflect the canvas at committedScale.
+      // Scale back to scale=1, then forward to targetScale for precise bounds.
+      const baseW = target.scrollWidth / committedScaleRef.current;
+      const baseH = target.scrollHeight / committedScaleRef.current;
+      maxX = Math.max(0, (baseW * targetScale - cw) / 2);
+      maxY = Math.max(0, (baseH * targetScale - ch) / 2);
+    } else {
+      // Fallback: approximate using container dimensions
+      maxX = (cw * (targetScale - 1)) / 2;
+      maxY = (ch * (targetScale - 1)) / 2;
+    }
+
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  }, []);
+
   // Auto-reset pan when scale returns to 1
   useEffect(() => {
     if (scale <= 1 && (panOffset.x !== 0 || panOffset.y !== 0)) {
@@ -247,10 +284,11 @@ export function useReaderGestures(
       // The pan offset should place the tapped point at the same screen position
       const scaleRatio = newScale / current;
       const prevPan = panOffsetRef.current;
-      const newPan = {
-        x: prevPan.x * scaleRatio - relX * rect.width * (scaleRatio - 1),
-        y: prevPan.y * scaleRatio - relY * rect.height * (scaleRatio - 1),
-      };
+      const newPan = clampPan(
+        prevPan.x * scaleRatio - relX * rect.width * (scaleRatio - 1),
+        prevPan.y * scaleRatio - relY * rect.height * (scaleRatio - 1),
+        newScale,
+      );
 
       scaleRef.current = newScale;
       liveScaleRef.current = newScale;
@@ -286,10 +324,11 @@ export function useReaderGestures(
     const dy = e.touches[0].clientY - touchStartRef.current.y;
 
     if (scaleRef.current > 1 && panStartRef.current) {
-      const newPan = {
-        x: panStartRef.current.panX + dx,
-        y: panStartRef.current.panY + dy,
-      };
+      const newPan = clampPan(
+        panStartRef.current.panX + dx,
+        panStartRef.current.panY + dy,
+        scaleRef.current,
+      );
       panOffsetRef.current = newPan;
       setPanOffset(newPan);
     } else if (scaleRef.current <= 1) {
@@ -381,7 +420,7 @@ export function useReaderGestures(
         } else if (oldLive > 1) {
           const ratio = newLive / oldLive;
           const prev = panOffsetRef.current;
-          const newPan = { x: prev.x * ratio, y: prev.y * ratio };
+          const newPan = clampPan(prev.x * ratio, prev.y * ratio, newLive);
           panOffsetRef.current = newPan;
           setPanOffset(newPan);
         }
@@ -398,7 +437,7 @@ export function useReaderGestures(
       } else if (currentScale > 1) {
         e.preventDefault();
         const prev = panOffsetRef.current;
-        const newPan = { x: prev.x - e.deltaX, y: prev.y - e.deltaY };
+        const newPan = clampPan(prev.x - e.deltaX, prev.y - e.deltaY, currentScale);
         panOffsetRef.current = newPan;
         setPanOffset(newPan);
       } else {
@@ -490,10 +529,11 @@ export function useReaderGestures(
               const scaleRatio = newScale / pinchScaleRef.current;
               const translateX = midX - panStartRef.current.x;
               const translateY = midY - panStartRef.current.y;
-              const newPan = {
-                x: panStartRef.current.panX * scaleRatio + translateX,
-                y: panStartRef.current.panY * scaleRatio + translateY,
-              };
+              const newPan = clampPan(
+                panStartRef.current.panX * scaleRatio + translateX,
+                panStartRef.current.panY * scaleRatio + translateY,
+                newScale,
+              );
               panOffsetRef.current = newPan;
               setPanOffset(newPan);
             } else {
@@ -565,6 +605,11 @@ export function useReaderGestures(
     if (!enableClickZones) return;
     // Don't navigate if clicking on a button or interactive element (prevents double-fire)
     if ((e.target as HTMLElement).closest('button, a, [role="button"]')) return;
+    // When zoomed in, taps pan rather than navigate — only allow controls toggle
+    if (scaleRef.current > 1) {
+      callbacksRef.current.onToggleControls?.();
+      return;
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const action = getTapZoneAction(e.clientX, rect);
 
