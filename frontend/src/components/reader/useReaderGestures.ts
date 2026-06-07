@@ -62,6 +62,14 @@ export interface ReaderGestureState {
    * feedback, deferring the expensive re-render until the gesture ends.
    */
   zoomTargetRef: React.RefObject<HTMLDivElement>;
+  /**
+   * Call this after the consumer has fully repainted the content at the new
+   * scale (i.e. after the PDF canvas re-render is complete). It clears the
+   * live CSS zoom transform on zoomTargetRef so the corrective scale() is
+   * removed exactly when the canvas shows the right pixels — eliminating the
+   * white flash that would occur if it were cleared too early.
+   */
+  notifyRenderComplete: () => void;
 }
 
 export function useReaderGestures(
@@ -135,22 +143,13 @@ export function useReaderGestures(
   panOffsetRef.current = panOffset;
   callbacksRef.current = callbacks;
 
-  // After the consumer re-renders at the committed scale, wait one frame
-  // for the canvas to actually paint, then clear the CSS transform.
+  // Sync scale refs and CSS transform on external scale changes (toolbar buttons,
+  // keyboard shortcuts, reset). For gesture-committed scale changes, the CSS
+  // transform is kept in place until notifyRenderComplete() is called by the
+  // consumer after the canvas has been fully repainted at the new scale.
   useEffect(() => {
-    // scale changed via setScale in commitScale — check if it matches live
-    if (Math.abs(scale - liveScaleRef.current) < 0.001 &&
-        Math.abs(scale - committedScaleRef.current) > 0.001) {
-      // Scale state caught up. Wait one rAF for the canvas to repaint,
-      // then update committedScaleRef and remove the CSS transform.
-      const raf = requestAnimationFrame(() => {
-        committedScaleRef.current = scale;
-        const el = zoomTargetRef.current;
-        if (el) el.style.transform = '';
-      });
-      return () => cancelAnimationFrame(raf);
-    }
-    // External scale change (e.g. reset to 1) — sync immediately
+    // External scale change: scale differs from both live and committed refs.
+    // This happens when the toolbar/keyboard changes scale independently of a gesture.
     if (Math.abs(scale - committedScaleRef.current) > 0.001 &&
         Math.abs(scale - liveScaleRef.current) > 0.001) {
       committedScaleRef.current = scale;
@@ -618,6 +617,13 @@ export function useReaderGestures(
     else callbacksRef.current.onToggleControls?.();
   }, [enableClickZones]);
 
+  const notifyRenderComplete = useCallback(() => {
+    if (Math.abs(liveScaleRef.current - committedScaleRef.current) < 0.001) return;
+    committedScaleRef.current = liveScaleRef.current;
+    const el = zoomTargetRef.current;
+    if (el) el.style.transform = '';
+  }, []);
+
   return {
     swipeOffset,
     panOffset,
@@ -630,5 +636,6 @@ export function useReaderGestures(
     containerRef,
     zoomTargetRef,
     resetPan,
+    notifyRenderComplete,
   };
 }

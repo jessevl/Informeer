@@ -224,6 +224,10 @@ export function PDFViewer({
   const renderTasksRef = useRef<Array<{ cancel: () => void }>>([]);
   const renderCycleRef = useRef(0);
 
+  // Stable ref so renderPages (defined before gestures) can clear the live CSS
+  // zoom transform on zoomTargetRef exactly after the canvas has repainted.
+  const notifyRenderCompleteRef = useRef<() => void>(() => {});
+
   const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `pdf:${entryId || 'inline'}` });
 
   const waitForCanvasCommit = useCallback(async () => {
@@ -567,19 +571,22 @@ export function PDFViewer({
     }
   }, [effectivePages, isSpreadView, getSpreadPages]);
 
-  // Render a single page to a canvas
+  // Render a single page and return a synchronous commit function.
+  // Rendering happens into an offscreen canvas so the visible canvas is never
+  // blanked while we wait for PDF.js — eliminating the white flash on zoom and
+  // page turns. The caller must invoke the returned commit() synchronously
+  // together with any other visual updates (e.g. clearing the CSS zoom
+  // transform) so the browser cannot paint an intermediate blank frame.
   const renderSinglePage = useCallback(async (
     pageNum: number,
     canvas: HTMLCanvasElement,
     availableWidth: number,
     availableHeight: number,
     segment: 'full' | 'left-half' | 'right-half' = 'full',
-  ) => {
-    if (!pdf) return;
+  ): Promise<() => void> => {
+    if (!pdf) return () => {};
 
     const page = await pdf.getPage(pageNum);
-    const context = canvas.getContext('2d');
-    if (!context) return;
 
     const dpr = window.devicePixelRatio || 1;
     const viewport = page.getViewport({ scale: 1 });
@@ -604,28 +611,44 @@ export function PDFViewer({
     const renderScale = fitScale * effectiveDpr;
     const scaledViewport = page.getViewport({ scale: renderScale });
     const renderWidth = segment === 'full' ? scaledViewport.width : scaledViewport.width / 2;
-
-    canvas.width = renderWidth;
-    canvas.height = scaledViewport.height;
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
-
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    const renderHeight = scaledViewport.height;
 
     const offsetX = segment === 'right-half' ? -(scaledViewport.width / 2) : 0;
 
+    // Draw into a hidden offscreen canvas while the visible canvas keeps its
+    // current content (old scale / old page).
+    const offscreen = document.createElement('canvas');
+    offscreen.width = renderWidth;
+    offscreen.height = renderHeight;
+    const offCtx = offscreen.getContext('2d');
+    if (!offCtx) return () => {};
+
+    offCtx.setTransform(1, 0, 0, 1, 0, 0);
+    offCtx.clearRect(0, 0, renderWidth, renderHeight);
+
     const task = page.render({
-      canvasContext: context,
+      canvasContext: offCtx,
       viewport: scaledViewport,
       transform: [1, 0, 0, 1, offsetX, 0],
     });
     renderTasksRef.current.push(task);
     await task.promise;
 
-    // Free pdf.js decoded image data for this page (the canvas already has
+    // Free pdf.js decoded image data for this page (the offscreen canvas has
     // the rendered bitmap). The page object stays cached for fast re-render.
     page.cleanup();
+
+    // Synchronous commit: resize + paint the visible canvas from the offscreen buffer.
+    return () => {
+      canvas.width = renderWidth;
+      canvas.height = renderHeight;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(offscreen, 0, 0);
+    };
   }, [pdf, scale]);
 
   // Render current page(s)
@@ -652,36 +675,46 @@ export function PDFViewer({
     try {
       const [leftPage, rightPage] = getSpreadPages(currentPage);
 
+      let leftCommit: () => void;
+      let rightCommit: (() => void) | null = null;
+
       if (rightPage && canvasRightRef.current) {
-        // Spread view: split available width between two pages
+        // Spread view: render both pages in parallel
         const gap = 4; // gap between pages
         const pageWidth = (containerWidth - gap) / 2;
 
-        await Promise.all([
+        [leftCommit, rightCommit] = await Promise.all([
           renderSinglePage(leftPage, canvasLeftRef.current, pageWidth, containerHeight),
           renderSinglePage(rightPage, canvasRightRef.current, pageWidth, containerHeight),
         ]);
-        canvasRightRef.current.style.display = 'block';
       } else if (isSplitSpreadPortraitView) {
-        await renderSinglePage(
+        leftCommit = await renderSinglePage(
           leftPage,
           canvasLeftRef.current,
           containerWidth,
           containerHeight,
           splitSpreadHalf === 'left' ? 'left-half' : 'right-half',
         );
-        if (canvasRightRef.current) {
-          canvasRightRef.current.style.display = 'none';
-        }
       } else {
         // Single page
-        await renderSinglePage(leftPage, canvasLeftRef.current, containerWidth, containerHeight);
-        if (canvasRightRef.current) {
-          canvasRightRef.current.style.display = 'none';
-        }
+        leftCommit = await renderSinglePage(leftPage, canvasLeftRef.current, containerWidth, containerHeight);
       }
 
       if (renderCycle !== renderCycleRef.current) return;
+
+      // Atomically: clear the CSS zoom transform + blit all rendered frames to
+      // their visible canvases in one synchronous block. The browser cannot
+      // paint between these statements, so there is no intermediate blank or
+      // wrong-scale frame.
+      notifyRenderCompleteRef.current();
+      leftCommit();
+      if (rightCommit) {
+        rightCommit();
+        canvasRightRef.current!.style.display = 'block';
+      } else if (canvasRightRef.current) {
+        canvasRightRef.current.style.display = 'none';
+      }
+
       await waitForCanvasCommit();
       if (renderCycle !== renderCycleRef.current) return;
       await finishEinkWork(true);
@@ -825,6 +858,9 @@ export function PDFViewer({
     { nextPage, prevPage, canGoNext, canGoPrev, onToggleControls: toggleControls },
     { scale, setScale, maxScale: 5, enableSwipePreview: !einkMode },
   );
+  // Keep the stable ref current so renderPages can signal the gesture hook
+  // after the canvas has fully repainted at the new scale.
+  notifyRenderCompleteRef.current = gestures.notifyRenderComplete;
 
   useReaderKeyboard({
     nextPage,
