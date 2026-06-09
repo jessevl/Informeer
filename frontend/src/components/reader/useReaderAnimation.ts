@@ -23,6 +23,12 @@ export interface ReaderAnimationState {
   pageTransition: PageTransition;
   /** Trigger an animated page turn. Calls `then()` after exit animation completes. */
   animatePageTurn: (direction: 'slide-left' | 'slide-right', then: () => void) => void;
+  /**
+   * Trigger the enter phase of a page turn. Call this after the canvas has been
+   * repainted with the new page content so the fade-in shows the correct pixels.
+   * Has no effect if no page turn enter is pending.
+   */
+  triggerPageEnter: () => void;
   /** Compute inline styles for the page container element */
   getPageStyle: (opts: {
     scale: number;
@@ -50,18 +56,21 @@ export function useReaderAnimation(options: UseReaderAnimationOptions = {}): Rea
       setPageTransition(direction);
       setTimeout(() => {
         then();
-        // Position new page at the opposite entry point (no transition)
+        // Position new page at the opposite entry point (no transition).
+        // The caller must invoke triggerPageEnter() after the canvas has been
+        // repainted with the new page — only then does the fade-in start.
         setPageTransition(direction === 'slide-left' ? 'enter-right' : 'enter-left');
-        // Next frame: animate from entry point to center
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            setPageTransition('none');
-          });
-        });
       }, 200);
     },
     [disabled],
   );
+
+  const triggerPageEnter = useCallback(() => {
+    setPageTransition(prev => {
+      if (prev === 'enter-right' || prev === 'enter-left') return 'none';
+      return prev;
+    });
+  }, []);
 
   const getPageStyle = useCallback(
     (opts: {
@@ -115,6 +124,7 @@ export function useReaderAnimation(options: UseReaderAnimationOptions = {}): Rea
   return {
     pageTransition,
     animatePageTurn,
+    triggerPageEnter,
     getPageStyle,
   };
 }

@@ -227,6 +227,9 @@ export function PDFViewer({
   // Stable ref so renderPages (defined before gestures) can clear the live CSS
   // zoom transform on zoomTargetRef exactly after the canvas has repainted.
   const notifyRenderCompleteRef = useRef<(onCommit: () => void) => void>((onCommit) => onCommit());
+  // Stable ref so renderPages can kick off the page-enter fade-in animation
+  // after the canvas has been blitted with the new page content.
+  const triggerPageEnterRef = useRef<() => void>(() => {});
 
   const { startEinkWork, finishEinkWork } = useEinkWorkTag({ prefix: `pdf:${entryId || 'inline'}` });
 
@@ -252,7 +255,8 @@ export function PDFViewer({
   const canGoPrev = isSplitSpreadPortraitView ? splitSpreadHalf === 'right' || currentPage > 1 : currentPage > 1;
 
   // Shared reader hooks (animation replaces local pageTransition + animatePageTurn)
-  const { animatePageTurn, getPageStyle } = useReaderAnimation({ disabled: einkMode });
+  const { animatePageTurn, triggerPageEnter, getPageStyle } = useReaderAnimation({ disabled: einkMode });
+  triggerPageEnterRef.current = triggerPageEnter;
 
   // Initialize ad skip toggle from setting
   useEffect(() => {
@@ -706,6 +710,8 @@ export function PDFViewer({
       // visible canvases. If a double-tap animation is still playing the gesture
       // hook defers this callback until the animation finishes, so the canvas
       // swap and transform clear always happen in the same synchronous block.
+      // After blitting, trigger the page-enter fade-in so the animation only
+      // starts once the canvas shows the new page (not the old one).
       const canvasRight = canvasRightRef.current;
       notifyRenderCompleteRef.current(() => {
         leftCommit();
@@ -715,6 +721,11 @@ export function PDFViewer({
         } else if (canvasRight) {
           canvasRight.style.display = 'none';
         }
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            triggerPageEnterRef.current();
+          });
+        });
       });
 
       await waitForCanvasCommit();
