@@ -42,6 +42,7 @@ const EINK_PAGINATED_TOUCH_RECOVERY_MS = 700;
 const PAGINATION_TAP_MAX_DURATION_MS = 250;
 const PAGINATION_DIRECTION_LOCK_DISTANCE_PX = 8;
 const SYNTHETIC_CLICK_SUPPRESS_MS = 350;
+const LEFT_EDGE_DISMISS_WIDTH_PX = 30;
 
 interface ArticleReaderProps {
   entry: Entry;
@@ -329,7 +330,17 @@ export function ArticleReader({
   // ─── Swipe-down-to-close (mobile) ────────────────────────────────
   const { scrollRef, progressRef } = useArticleScrollProgress(entry.id, isPaginated ? 'horizontal' : 'vertical');
   const [pullDismiss, setPullDismiss] = useState(0); // 0..1 progress
-  const pullRef = useRef({ startY: 0, active: false, pulling: false });
+  const [dismissDir, setDismissDir] = useState<'down' | 'up' | 'right' | null>(null);
+  const pullRef = useRef({
+    startX: 0,
+    startY: 0,
+    active: false,
+    pulling: false,
+    direction: null as 'down' | 'up' | 'right' | null,
+    canDown: false,
+    canUp: false,
+    canRight: false,
+  });
   const paginatedTouchRef = useRef({
     startX: 0,
     startY: 0,
@@ -572,8 +583,22 @@ export function ArticleReader({
     }
 
     const el = scrollRef.current;
-    if (!el || el.scrollTop > 0) return;
-    pullRef.current = { startY: e.touches[0].clientY, active: true, pulling: false };
+    if (!el) return;
+    const touch = e.touches[0];
+    const atTop = el.scrollTop <= 0;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+    const fromLeftEdge = touch.clientX <= LEFT_EDGE_DISMISS_WIDTH_PX;
+    if (!atTop && !atBottom && !fromLeftEdge) return;
+    pullRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      active: true,
+      pulling: false,
+      direction: null,
+      canDown: atTop,
+      canUp: atBottom,
+      canRight: fromLeftEdge,
+    };
   }, [isPaginated, scrollRef]);
 
   const handleArticleTouchMove = useCallback((e: React.TouchEvent<HTMLElement>) => {
@@ -620,20 +645,37 @@ export function ArticleReader({
     const el = scrollRef.current;
     if (!el) return;
 
-    const dy = e.touches[0].clientY - p.startY;
+    const touch = e.touches[0];
+    const dx = touch.clientX - p.startX;
+    const dy = touch.clientY - p.startY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
 
-    // Only start pulling after a clear downward movement while at scroll top
-    if (!p.pulling) {
-      if (dy > 10 && el.scrollTop <= 0) {
-        p.pulling = true;
+    if (!p.direction) {
+      if (absDx < 8 && absDy < 8) return;
+      if (absDy > absDx * 1.2 && dy > 0 && p.canDown) {
+        p.direction = 'down';
+      } else if (absDy > absDx * 1.2 && dy < 0 && p.canUp) {
+        p.direction = 'up';
+      } else if (absDx > absDy * 1.2 && dx > 0 && p.canRight) {
+        p.direction = 'right';
       } else {
+        p.active = false;
         return;
       }
+      p.pulling = true;
+      setDismissDir(p.direction);
     }
 
-    if (dy > 0 && el.scrollTop <= 0) {
+    if (p.direction === 'down' && el.scrollTop <= 0) {
       const distance = Math.min(dy, 200);
-      setPullDismiss(distance / 150); // 150px = full threshold
+      setPullDismiss(distance > 0 ? distance / 150 : 0);
+    } else if (p.direction === 'up' && el.scrollTop + el.clientHeight >= el.scrollHeight - 2) {
+      const distance = Math.min(-dy, 200);
+      setPullDismiss(distance > 0 ? distance / 150 : 0);
+    } else if (p.direction === 'right') {
+      const distance = Math.min(dx, 200);
+      setPullDismiss(distance > 0 ? distance / 150 : 0);
     }
   }, [handleNextPage, handlePrevPage, isPaginated, scrollRef]);
 
@@ -692,10 +734,12 @@ export function ArticleReader({
     const p = pullRef.current;
     p.active = false;
     p.pulling = false;
+    p.direction = null;
     if (pullDismiss >= 1) {
       onClose();
     }
     setPullDismiss(0);
+    setDismissDir(null);
 }, [handleNextPage, handlePaginatedTap, handlePrevPage, isPaginated, onClose, pullDismiss]);
 
   const handleArticleClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
@@ -719,6 +763,11 @@ export function ArticleReader({
     const pullOffset = Math.min(pullDismiss * 100, 100);
     const pullScale = 1 - Math.min(pullDismiss, 1) * 0.02;
     const pullOpacity = 1 - Math.min(pullDismiss, 1) * 0.08;
+    const pullTransform = dismissDir === 'up'
+      ? `translateY(-${pullOffset}px) scale(${pullScale})`
+      : dismissDir === 'right'
+        ? `translateX(${pullOffset * 2}px) scale(${pullScale})`
+        : `translateY(${pullOffset}px) scale(${pullScale})`;
 
     return (
       <div
@@ -728,7 +777,7 @@ export function ArticleReader({
           !einkMode && 'animate-slide-in-right'
         )}
         style={pullDismiss > 0 ? {
-          transform: `translateY(${pullOffset}px) scale(${pullScale})`,
+          transform: pullTransform,
           opacity: pullOpacity,
           borderRadius: '12px',
           transition: 'none',
@@ -797,12 +846,28 @@ export function ArticleReader({
           </div>
         </div>
         
-        {/* Pull-down dismiss indicator */}
-        {pullDismiss > 0 && (
+        {/* Pull-dismiss indicators */}
+        {pullDismiss > 0 && dismissDir === 'down' && (
           <div className="absolute top-[env(safe-area-inset-top)] left-1/2 -translate-x-1/2 z-[60] pt-2 pointer-events-none">
             <div
               className="w-10 h-1 rounded-full bg-[var(--color-text-tertiary)]"
               style={{ opacity: Math.min(pullDismiss, 1), transform: `scaleX(${0.5 + pullDismiss * 0.5})` }}
+            />
+          </div>
+        )}
+        {pullDismiss > 0 && dismissDir === 'up' && (
+          <div className="absolute bottom-[env(safe-area-inset-bottom,0px)] left-1/2 -translate-x-1/2 z-[60] pb-2 pointer-events-none">
+            <div
+              className="w-10 h-1 rounded-full bg-[var(--color-text-tertiary)]"
+              style={{ opacity: Math.min(pullDismiss, 1), transform: `scaleX(${0.5 + pullDismiss * 0.5})` }}
+            />
+          </div>
+        )}
+        {pullDismiss > 0 && dismissDir === 'right' && (
+          <div className="absolute left-2 top-1/2 -translate-y-1/2 z-[60] pointer-events-none">
+            <div
+              className="w-1 h-10 rounded-full bg-[var(--color-text-tertiary)]"
+              style={{ opacity: Math.min(pullDismiss, 1), transform: `scaleY(${0.5 + pullDismiss * 0.5})` }}
             />
           </div>
         )}
