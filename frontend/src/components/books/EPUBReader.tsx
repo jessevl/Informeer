@@ -555,7 +555,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   // === Shared Hooks ===
 
-  const { animatePageTurn, getPageStyle } = useReaderAnimation({ disabled: einkMode });
+  const { animatePageTurn, triggerPageEnter, getPageStyle } = useReaderAnimation({ disabled: einkMode });
+  const triggerPageEnterRef = useRef(triggerPageEnter);
+  triggerPageEnterRef.current = triggerPageEnter;
 
   const runRenditionPageTurn = useCallback(
     (attemptRef: { current: boolean }, action: (() => Promise<unknown>) | null) => {
@@ -837,6 +839,16 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         rendition.on('relocated', (location: any) => {
           if (cancelled) return;
           setIsLoading(false);
+
+          // Run the enter-phase fade-in only after the new page has been painted,
+          // mirroring the PDFViewer pattern. Without this the page stays parked at
+          // `enter-right`/`enter-left` (opacity 0), leaving the reader blank after
+          // each animated page turn.
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              triggerPageEnterRef.current();
+            });
+          });
 
           const restoreGuard = restoreGuardRef.current;
           const shouldSkipProgressPersistence = restoreGuard.phase !== 'idle';
