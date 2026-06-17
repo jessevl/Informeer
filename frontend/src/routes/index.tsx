@@ -446,7 +446,7 @@ function HomePage() {
         onSidebarOverlayRequest={() => setSidebarOverlayRequestToken((prev) => prev + 1)}
         headerTitle={getViewTitle()}
         onBack={(selectedEntry || selectedChannelId !== null || navigationHistory.length > 0) ? handleGoBack : undefined}
-        onRefresh={handleRefresh}
+        onRefresh={mediaType === 'books' ? undefined : handleRefresh}
         isRefreshing={isRefreshing}
         viewMode={viewMode}
         onViewModeChange={mediaType !== 'audio' && mediaType !== 'magazines' && mediaType !== 'video' && mediaType !== 'books' ? (mode) => setViewModeForScope(viewScopeKey, mode) : undefined}
@@ -454,7 +454,7 @@ function HomePage() {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenSearch={() => setSearchOpen(true)}
+        onOpenSearch={mediaType === 'books' ? undefined : () => setSearchOpen(true)}
         overlayReader={preferFullscreenMagazineReader}
         headerActions={
           mediaType === 'books' ? (

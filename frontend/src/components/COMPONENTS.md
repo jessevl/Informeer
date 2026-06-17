@@ -47,6 +47,15 @@ routes/index.tsx → PDFViewer → useReaderGestures + useReaderAnimation + useR
 | BookGrid.tsx | `BookGrid` | BooksView |
 | EPUBReader.tsx | `EPUBReader` | routes/index.tsx |
 | ZLibSearch.tsx | `ZLibSearch` | BooksView |
+| BookCover.tsx | `BookCover`, `useBookCoverUrl` | BookCoverRow, BookHero |
+| BookHero.tsx | `BookHero` | BooksView |
+| BookCoverRow.tsx | `BookCoverRow` | BooksView |
+| BooksHomeSection.tsx | `BooksHomeSection` | BooksView |
+| ReadingStatsStrip.tsx | `ReadingStatsStrip` | BooksView |
+| YearlyGoalTile.tsx | `YearlyGoalTile` | ReadingStatsStrip |
+| LibraryToolbar.tsx | `LibraryToolbar` | BooksView |
+| libraryFilters.ts | `LibrarySortMode`, `LibraryFilterMode`, `bookMatchesFilter`, etc. | BooksView, LibraryToolbar |
+| useBooksHomeData.ts | `useBooksHomeData` | BooksView |
 
 ### `entries/`
 No index.ts — components imported directly.
@@ -164,6 +173,7 @@ No index.ts — components imported directly.
 |------|---------|---------|
 | FilterBar.tsx | `FilterBar` | EntryList |
 | OfflineSaveButton.tsx | `OfflineSaveButton` | ArticleReader |
+| SegmentedTabBar.tsx | `SegmentedTabBar`, `SegmentedTab` | BooksView (and any future sub-view tab strip) |
 | ToggleSwitch.tsx | `ToggleSwitch` | Settings sections |
 
 ### `videos/`

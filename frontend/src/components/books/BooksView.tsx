@@ -1,46 +1,55 @@
 /**
  * BooksView Component
- * Main view for the Books section.
- * Shows the user's EPUB library as a cover grid.
- * Supports uploading EPUBs and searching/downloading from LibGen.
+ * Top-level Books page. Splits into two sub-views:
+ *   - "Reading": Currently Reading hero, stats strip, Recently Added shelf
+ *   - "Library": searchable & paginated grid of every book the user owns
+ * A floating glass tab bar at the bottom of the viewport switches between
+ * the two. Uploads (header buttons + drag&drop), Z-Library search, and
+ * the EPUB reader overlay are unchanged.
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/lib/utils';
-import { Library, Upload, Search, Loader2, ArrowUpDown, Filter, CloudOff } from 'lucide-react';
+import {
+  Library,
+  Upload,
+  Search,
+  Loader2,
+  CloudOff,
+  SearchX,
+  ChevronDown,
+  BookOpen,
+} from 'lucide-react';
 import { useBooksStore } from '@/stores/books';
 import { useModulesStore } from '@/stores/modules';
-import { useSettingsStore } from '@/stores/settings';
 import { BookGrid } from './BookGrid';
 import { EPUBReader } from './EPUBReader';
 import { ZLibSearch } from './ZLibSearch';
+import { BookHero } from './BookHero';
+import { ReadingStatsStrip } from './ReadingStatsStrip';
+import { BookCoverRow } from './BookCoverRow';
+import { BooksHomeSection } from './BooksHomeSection';
+import { useBooksHomeData } from './useBooksHomeData';
+import { LibraryToolbar } from './LibraryToolbar';
+import {
+  type LibrarySortMode,
+  type LibraryFilterMode,
+  FILTER_EMPTY_LABELS,
+  bookMatchesFilter,
+} from './libraryFilters';
+import { SegmentedTabBar, type SegmentedTab } from '@/components/ui/SegmentedTabBar';
+
+type BooksTab = 'reading' | 'library';
 import { useOfflineRegistry } from '@/stores/offline';
-import { FilterBar } from '@/components/ui/FilterBar';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import { useIsMobile, useIsTablet } from '@frameer/hooks/useMobileDetection';
 
 import type { Book } from '@/types/api';
 
-function getBookGridColumns(width: number): number {
-  if (width >= 1700) return 8;
-  if (width >= 1450) return 7;
-  if (width >= 1200) return 6;
-  if (width >= 900) return 5;
-  if (width >= 640) return 4;
-  if (width >= 480) return 3;
-  return 2;
-}
-
-function useBookGridColumns(): number {
-  const [columns, setColumns] = useState(() => getBookGridColumns(window.innerWidth));
-
-  useEffect(() => {
-    const handleResize = () => setColumns(getBookGridColumns(window.innerWidth));
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  return columns;
-}
+const LIBRARY_PAGE_SIZE = 36;
+// Approximate rendered height of the BooksTabBar glass pill; used to pad
+// the scroll area so the last grid row never tucks under the floating bar.
+const BOOKS_TAB_BAR_HEIGHT_PX = 52;
 
 /**
  * Floating header actions for the Books section.
@@ -115,23 +124,41 @@ export function BooksView() {
     isReaderOpen,
     progressCache,
     recentBookActivity,
+    highlights,
+    yearlyBooksGoal,
     fetchBooks,
     uploadBook,
     deleteBook,
     openReader,
     closeReader,
+    setYearlyBooksGoal,
   } = useBooksStore();
 
-  // Sort & filter state
-  type SortMode = 'recent-activity' | 'recent-added' | 'title' | 'author';
-  type FilterMode = 'all' | 'unfinished' | 'unread' | 'reading' | 'finished' | 'offline';
-  const [sortBy, setSortBy] = useState<SortMode>('recent-activity');
-  const [filterBy, setFilterBy] = useState<FilterMode>('unfinished');
+  // Active sub-view
+  const [activeTab, setActiveTab] = useState<BooksTab>('reading');
+
+  // Detect whether the bottom FloatingNavBar is rendered (mobile + tablet
+  // layouts), so the tab bar can sit just above it.
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
+  const hasFloatingNav = isMobile || isTablet;
+  // CSS offset matching AppLayout's --app-navbar-offset for the current layout.
+  const floatingNavOffsetCss = hasFloatingNav
+    ? 'calc(72px + var(--safe-area-bottom))'
+    : 'calc(max(var(--safe-area-bottom), 0px) + 12px)';
+  // Where the BooksTabBar sits: just above the nav (or above the safe area on desktop).
+  const tabBarBottomCss = `calc(${floatingNavOffsetCss} + 8px)`;
+  // Bottom buffer for the scroll area: clear the tab bar + 12px breathing room.
+  const scrollPaddingBottomCss = `calc(${floatingNavOffsetCss} + ${BOOKS_TAB_BAR_HEIGHT_PX}px + 20px)`;
+
+  // Library sort/filter/search state
+  const [sortBy, setSortBy] = useState<LibrarySortMode>('recent-activity');
+  const [filterBy, setFilterBy] = useState<LibraryFilterMode>('all');
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryPage, setLibraryPage] = useState(1);
   const { effectiveOffline } = useEffectiveOfflineState();
-  const effectiveFilterBy = effectiveOffline ? 'offline' : filterBy;
+  const effectiveFilterBy: LibraryFilterMode = effectiveOffline ? 'offline' : filterBy;
   const offlineRegistry = useOfflineRegistry();
-  const gridColumns = useBookGridColumns();
-  const overviewRef = useRef<HTMLDivElement>(null);
   const offlineFallbackBooks = useMemo<Book[]>(() => {
     return offlineRegistry
       .filter((item) => item.type === 'book')
@@ -163,60 +190,122 @@ export function BooksView() {
   }, [offlineRegistry]);
   const displayedBooks = effectiveOffline && books.length === 0 ? offlineFallbackBooks : books;
 
+  const booksTabs = useMemo<ReadonlyArray<SegmentedTab<BooksTab>>>(
+    () => [
+      { value: 'reading', label: 'Reading', icon: BookOpen },
+      {
+        value: 'library',
+        label: 'Library',
+        icon: Library,
+        badge: displayedBooks.length,
+      },
+    ],
+    [displayedBooks.length]
+  );
+
+  const home = useBooksHomeData({
+    books: displayedBooks,
+    progressCache,
+    recentBookActivity,
+    highlightsCount: highlights.length,
+    yearlyBooksGoal,
+  });
+
+  const secondaryProgressMap = useMemo(() => {
+    const map: Record<number, typeof progressCache[number]> = {};
+    home.secondaryInProgress.forEach((b) => {
+      if (progressCache[b.id]) map[b.id] = progressCache[b.id];
+    });
+    return map;
+  }, [home.secondaryInProgress, progressCache]);
 
   // Fetch books on mount
   useEffect(() => {
     fetchBooks();
   }, [fetchBooks]);
 
-  // Sort & filter
+  // Set of book IDs saved offline — computed once per registry change so the
+  // 'offline' filter doesn't rebuild a Set on every input keystroke.
+  const offlineBookIds = useMemo(
+    () =>
+      new Set(
+        offlineRegistry.filter((i) => i.type === 'book').map((i) => i.id)
+      ),
+    [offlineRegistry]
+  );
+
+  // Sort & filter (library section)
   const sortedFilteredBooks = useMemo(() => {
-    let filtered = [...displayedBooks];
+    const q = librarySearch.trim().toLowerCase();
+    const filtered = displayedBooks.filter((b) => {
+      if (q) {
+        const matchesQuery =
+          b.title.toLowerCase().includes(q) ||
+          (b.author || '').toLowerCase().includes(q);
+        if (!matchesQuery) return false;
+      }
+      return bookMatchesFilter(b, effectiveFilterBy, progressCache, offlineBookIds);
+    });
 
-    const getRecentActivityTime = (book: Book) => {
-      const localActivity = recentBookActivity[book.id];
-      const progressActivity = progressCache[book.id]?.updated_at || null;
-      return Math.max(
-        localActivity ? new Date(localActivity).getTime() : 0,
-        progressActivity ? new Date(progressActivity).getTime() : 0,
+    const getActivityTime = (book: Book) =>
+      Math.max(
+        recentBookActivity[book.id]
+          ? new Date(recentBookActivity[book.id]).getTime()
+          : 0,
+        progressCache[book.id]?.updated_at
+          ? new Date(progressCache[book.id].updated_at).getTime()
+          : 0
       );
-    };
 
-    // Filter
-    if (effectiveFilterBy === 'unfinished') {
-      filtered = filtered.filter(b => (progressCache[b.id]?.percentage || 0) < 1);
-    } else if (effectiveFilterBy === 'unread') {
-      filtered = filtered.filter(b => !progressCache[b.id] || progressCache[b.id].percentage === 0);
-    } else if (effectiveFilterBy === 'reading') {
-      filtered = filtered.filter(b => {
-        const p = progressCache[b.id]?.percentage || 0;
-        return p > 0 && p < 1;
-      });
-    } else if (effectiveFilterBy === 'finished') {
-      filtered = filtered.filter(b => (progressCache[b.id]?.percentage || 0) >= 1);
-    } else if (effectiveFilterBy === 'offline') {
-      const offlineBookIds = new Set(offlineRegistry.filter(i => i.type === 'book').map(i => i.id));
-      filtered = filtered.filter(b => offlineBookIds.has(String(b.id)));
-    }
-
-    // Sort
-    if (sortBy === 'title') {
-      filtered.sort((a, b) => a.title.localeCompare(b.title));
-    } else if (sortBy === 'author') {
-      filtered.sort((a, b) => (a.author || '').localeCompare(b.author || ''));
-    } else if (sortBy === 'recent-added') {
-      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    } else {
-      filtered.sort((a, b) => {
-        const activityDiff = getRecentActivityTime(b) - getRecentActivityTime(a);
-        if (activityDiff !== 0) return activityDiff;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
+    switch (sortBy) {
+      case 'title':
+        filtered.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+      case 'author':
+        filtered.sort((a, b) =>
+          (a.author || '').localeCompare(b.author || '')
+        );
+        break;
+      case 'recent-added':
+        filtered.sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        break;
+      case 'recent-activity':
+      default:
+        filtered.sort((a, b) => {
+          const diff = getActivityTime(b) - getActivityTime(a);
+          if (diff !== 0) return diff;
+          return (
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+        });
+        break;
     }
 
     return filtered;
-  }, [displayedBooks, progressCache, recentBookActivity, sortBy, effectiveFilterBy, offlineRegistry]);
-  // Delete handler with confirmation
+  }, [
+    displayedBooks,
+    progressCache,
+    recentBookActivity,
+    sortBy,
+    effectiveFilterBy,
+    offlineBookIds,
+    librarySearch,
+  ]);
+
+  // Reset pagination whenever the result set changes shape
+  useEffect(() => {
+    setLibraryPage(1);
+  }, [sortBy, effectiveFilterBy, librarySearch]);
+
+  const visibleLibraryBooks = useMemo(
+    () => sortedFilteredBooks.slice(0, libraryPage * LIBRARY_PAGE_SIZE),
+    [sortedFilteredBooks, libraryPage]
+  );
+  const remainingLibraryBooks = sortedFilteredBooks.length - visibleLibraryBooks.length;
+
   const handleDelete = useCallback(async (book: { id: number; title: string }) => {
     if (!confirm(`Delete "${book.title}"?`)) return;
     try {
@@ -249,6 +338,11 @@ export function BooksView() {
     }
   }, [uploadBook]);
 
+  // displayedBooks.length > 0 implies !(isLoading && length === 0) so the
+  // second clause is redundant.
+  const showHomeView = displayedBooks.length > 0;
+  const stats = home.stats;
+
   return (
     <>
       <div
@@ -267,42 +361,7 @@ export function BooksView() {
           </div>
         )}
 
-        {/* Content */}
         <div className="flex flex-1 min-h-0 flex-col overflow-hidden content-below-header">
-          {/* Sort/Filter bar — only shown when there are books */}
-          {displayedBooks.length > 0 && (
-            <FilterBar
-              groups={[
-                {
-                  icon: ArrowUpDown,
-                  options: [
-                    { value: 'recent-activity' as const, label: 'Recently Read' },
-                    { value: 'recent-added' as const, label: 'Recently Added' },
-                    { value: 'title' as const, label: 'Title' },
-                    { value: 'author' as const, label: 'Author' },
-                  ],
-                  value: sortBy,
-                  onChange: setSortBy,
-                },
-                ...(!effectiveOffline ? [{
-                  icon: Filter,
-                  options: [
-                    { value: 'all' as const, label: 'All' },
-                    { value: 'unfinished' as const, label: 'Unfinished' },
-                    { value: 'unread' as const, label: 'Unread' },
-                    { value: 'reading' as const, label: 'Reading' },
-                    { value: 'finished' as const, label: 'Finished' },
-                    { value: 'offline' as const, label: 'Offline' },
-                  ],
-                  value: effectiveFilterBy,
-                  onChange: setFilterBy,
-                }] : []),
-              ]}
-              trailing={`${sortedFilteredBooks.length} ${sortedFilteredBooks.length === 1 ? 'book' : 'books'}`}
-            />
-          )}
-
-          {/* Book grid or empty state */}
           {isLoading && displayedBooks.length === 0 ? (
             <div className="flex items-center justify-center h-64">
               <div className="w-6 h-6 border-2 border-[var(--color-accent-fg)] border-t-transparent rounded-full animate-spin" />
@@ -323,31 +382,154 @@ export function BooksView() {
                   : 'Upload EPUB files or search Z-Library to build your library. Books are stored on the server for reading across devices.'}
               </p>
               {!effectiveOffline && (
-              <div className="flex flex-col items-center gap-2 text-xs">
-                <p className="flex items-center gap-1.5">
-                  <Upload size={12} />
-                  Drag &amp; drop EPUB files or use the header buttons
-                </p>
-              </div>
+                <div className="flex flex-col items-center gap-2 text-xs">
+                  <p className="flex items-center gap-1.5">
+                    <Upload size={12} />
+                    Drag &amp; drop EPUB files or use the header buttons
+                  </p>
+                </div>
               )}
             </div>
-          ) : (
-            <div ref={overviewRef} className="flex-1 min-h-0 overflow-y-auto content-above-navbar">
-              <BookGrid
-                books={sortedFilteredBooks}
-                progressCache={progressCache}
-                onOpenBook={openReader}
-                onDeleteBook={handleDelete}
-              />
-            </div>
-          )}
+          ) : showHomeView ? (
+            <div
+              key={activeTab}
+              className="flex-1 min-h-0 overflow-y-auto animate-fade-in"
+              style={{ paddingBottom: scrollPaddingBottomCss }}
+            >
+                {activeTab === 'reading' ? (
+                  <>
+                    {home.hero && (
+                      <BookHero
+                        book={home.hero}
+                        progress={progressCache[home.hero.id]}
+                        onContinue={openReader}
+                        secondaryInProgress={home.secondaryInProgress}
+                        secondaryProgressMap={secondaryProgressMap}
+                        onOpenSecondary={openReader}
+                      />
+                    )}
 
-          {/* Error state */}
+                    <div
+                      className="animate-fade-in"
+                      style={{ animationDelay: '80ms', animationFillMode: 'backwards' }}
+                    >
+                      <ReadingStatsStrip
+                        streakDays={stats.streakDays}
+                        yearlyGoal={stats.yearlyBooksGoal}
+                        finishedThisYear={stats.finishedThisYear}
+                        totalBooks={stats.totalBooks}
+                        highlightsCount={stats.highlightsCount}
+                        onSetGoal={setYearlyBooksGoal}
+                      />
+                    </div>
+
+
+                    {home.recentlyAdded.length > 0 && (
+                      <div
+                        className="animate-fade-in"
+                        style={{ animationDelay: '160ms', animationFillMode: 'backwards' }}
+                      >
+                        <BooksHomeSection
+                          title="Recently Added"
+                          count={home.recentlyAdded.length}
+                          action={{
+                            label: 'See library',
+                            onClick: () => setActiveTab('library'),
+                          }}
+                        >
+                          <BookCoverRow
+                            books={home.recentlyAdded}
+                            progressCache={progressCache}
+                            onOpenBook={openReader}
+                          />
+                        </BooksHomeSection>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="pt-2 pb-6">
+                    <LibraryToolbar
+                      search={librarySearch}
+                      onSearchChange={setLibrarySearch}
+                      sortBy={sortBy}
+                      onSortChange={setSortBy}
+                      filterBy={effectiveFilterBy}
+                      onFilterChange={setFilterBy}
+                      isOffline={effectiveOffline}
+                      filteredCount={sortedFilteredBooks.length}
+                      totalCount={displayedBooks.length}
+                    />
+                    {sortedFilteredBooks.length === 0 ? (
+                      <LibraryNoResults
+                        hasSearch={librarySearch.trim() !== ''}
+                        filterBy={effectiveFilterBy}
+                        onClear={() => {
+                          setLibrarySearch('');
+                          setFilterBy('all');
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <BookGrid
+                          books={visibleLibraryBooks}
+                          progressCache={progressCache}
+                          onOpenBook={openReader}
+                          onDeleteBook={handleDelete}
+                        />
+                        {remainingLibraryBooks > 0 && (
+                          <div className="flex flex-col items-center gap-2 px-6 py-5">
+                            <button
+                              type="button"
+                              onClick={() => setLibraryPage((p) => p + 1)}
+                              className={cn(
+                                'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
+                                'bg-[var(--color-surface-secondary)] border border-[var(--color-border-default)]',
+                                'text-sm font-medium text-[var(--color-text-secondary)]',
+                                'hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text-primary)]',
+                                'transition-colors'
+                              )}
+                            >
+                              <ChevronDown size={14} />
+                              Show {Math.min(LIBRARY_PAGE_SIZE, remainingLibraryBooks)} more
+                            </button>
+                            <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+                              Showing {visibleLibraryBooks.length} of {sortedFilteredBooks.length}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+            </div>
+          ) : null}
+
           {error && (
             <div className="px-6 py-3 text-sm text-red-500 text-center">{error}</div>
           )}
         </div>
       </div>
+
+      {/* Floating sub-view tab bar — bottom of viewport, above FloatingNavBar */}
+      {showHomeView && !isReaderOpen && (
+        <div
+          className={cn(
+            'fixed left-0 right-0 z-50 px-4',
+            'flex justify-center pointer-events-none',
+            'animate-slide-up'
+          )}
+          style={{ bottom: tabBarBottomCss }}
+        >
+          <div className="pointer-events-auto">
+            <SegmentedTabBar
+              value={activeTab}
+              onChange={setActiveTab}
+              tabs={booksTabs}
+              ariaLabel="Books views"
+            />
+          </div>
+        </div>
+      )}
 
       {/* EPUB Reader overlay */}
       {isReaderOpen && selectedBook && (
@@ -357,5 +539,50 @@ export function BooksView() {
         />
       )}
     </>
+  );
+}
+
+function LibraryNoResults({
+  hasSearch,
+  filterBy,
+  onClear,
+}: {
+  hasSearch: boolean;
+  filterBy: LibraryFilterMode;
+  onClear: () => void;
+}) {
+  const label = FILTER_EMPTY_LABELS[filterBy];
+  let message: string;
+  if (hasSearch && label) {
+    message = `No ${label} books match your search.`;
+  } else if (hasSearch) {
+    message = 'No books match your search.';
+  } else if (label) {
+    message = `No ${label} books yet.`;
+  } else {
+    message = 'No books to show.';
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-14 px-6 text-center">
+      <SearchX
+        size={36}
+        className="text-[var(--color-text-tertiary)] opacity-50"
+      />
+      <p className="text-sm text-[var(--color-text-secondary)]">{message}</p>
+      {(hasSearch || filterBy !== 'all') && (
+        <button
+          type="button"
+          onClick={onClear}
+          className={cn(
+            'text-xs font-medium px-3 py-1 rounded-full',
+            'text-[var(--color-accent-fg)]',
+            'hover:bg-[var(--color-accent-subtle)] transition-colors'
+          )}
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
   );
 }

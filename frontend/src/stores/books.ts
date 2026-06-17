@@ -31,6 +31,9 @@ interface BooksState {
   progressCache: Record<number, BookProgress>;
   recentBookActivity: Record<number, string>;
 
+  // User preferences
+  yearlyBooksGoal: number;
+
   // Actions
   fetchBooks: (search?: string) => Promise<void>;
   uploadBook: (file: File) => Promise<Book>;
@@ -47,6 +50,7 @@ interface BooksState {
   updateHighlight: (bookId: number, highlightId: number, data: { note?: string; color?: string }) => Promise<void>;
   deleteHighlight: (bookId: number, highlightId: number) => Promise<void>;
   downloadFromZLib: (result: ZLibSearchResult) => Promise<Book>;
+  setYearlyBooksGoal: (n: number) => void;
 }
 
 function normalizeBookPercentage(percentage: number): number {
@@ -71,6 +75,7 @@ export const useBooksStore = create<BooksState>()(
       highlights: [],
       progressCache: {},
       recentBookActivity: {},
+      yearlyBooksGoal: 12,
 
       fetchBooks: async (search?: string) => {
         if (!navigator.onLine && get().books.length > 0) {
@@ -336,6 +341,11 @@ export const useBooksStore = create<BooksState>()(
         }));
         return book;
       },
+
+      setYearlyBooksGoal: (n: number) => {
+        const clamped = Math.max(0, Math.min(999, Math.floor(n)));
+        set({ yearlyBooksGoal: clamped });
+      },
     }),
     {
       name: 'informeer-books',
@@ -344,6 +354,7 @@ export const useBooksStore = create<BooksState>()(
         total: state.total,
         progressCache: state.progressCache,
         recentBookActivity: state.recentBookActivity,
+        yearlyBooksGoal: state.yearlyBooksGoal,
       }),
     }
   )
