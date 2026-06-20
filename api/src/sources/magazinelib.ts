@@ -684,11 +684,12 @@ export class MagazineLibSource implements ContentSource {
         await downloadAndCacheFile(pdfUrl, cachePdfPath(issue.id), `${BASE_URL}/`);
         log.debug('[magazinelib] Repaired PDF', { id: issue.id });
       } catch (err: any) {
-        log.debug('[magazinelib] Failed to repair PDF, marking as failed', { id: issue.id, error: err.message });
-        db.run(
-          `UPDATE entries SET download_failed = 1, changed_at = datetime('now') WHERE hash = ?`,
-          [`mag-${issue.id}`]
-        );
+        // Background pre-cache failures are transient by nature (VK signed URLs
+        // expire, network blips, rate-limits). Don't mark the entry as failed —
+        // that's reserved for repeated user-driven failures via the on-demand
+        // PDF route. A blurred cover for a working magazine is worse than
+        // re-trying next refresh cycle.
+        log.debug('[magazinelib] Pre-cache PDF failed (will retry next refresh)', { id: issue.id, error: err.message });
       }
     }
   }

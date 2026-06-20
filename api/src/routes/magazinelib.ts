@@ -17,9 +17,6 @@ import { getScheduler } from '../services/scheduler.ts';
 import { badRequest, forbidden, notFound, conflict } from '../lib/errors.ts';
 import { log } from '../lib/logger.ts';
 import { getSystemCategoryId } from './categories.ts';
-import { config } from '../config.ts';
-import { existsSync, unlinkSync } from 'fs';
-import { join } from 'path';
 
 const magazinelib = new Hono<{ Variables: { user: AuthUser } }>();
 
@@ -56,6 +53,11 @@ function requireModule() {
 // All routes under /v1/ — require auth
 // ===========================================================================
 
+// Threshold of consecutive on-demand failures before the entry is flagged
+// as broken in the UI. VK signed URLs and userapi.com redirects fail
+// transiently often enough that a single miss should not stick.
+const PDF_FAILURE_THRESHOLD = 3;
+
 // GET /v1/magazinelib/pdf/:issueId — on-demand PDF resolution & streaming
 magazinelib.get('/v1/magazinelib/pdf/:issueId', async (c) => {
   requireModule();
@@ -66,10 +68,10 @@ magazinelib.get('/v1/magazinelib/pdf/:issueId', async (c) => {
   try {
     const filePath = await getPdf(issueId);
 
-    // Clear any prior failure flag on this entry
+    // Success — clear both the attempt counter and any prior failure flag
     const db = getDb();
     db.run(
-      "UPDATE entries SET download_failed = 0 WHERE user_id = ? AND hash = ? AND download_failed = 1",
+      "UPDATE entries SET download_failed = 0, download_attempts = 0 WHERE user_id = ? AND hash = ? AND (download_failed = 1 OR download_attempts > 0)",
       [user.id, `mag-${issueId}`]
     );
 
@@ -87,11 +89,17 @@ magazinelib.get('/v1/magazinelib/pdf/:issueId', async (c) => {
   } catch (err: any) {
     log.warn('[magazinelib] PDF proxy error', { issueId, error: err.message });
 
-    // Mark the entry as failed so we don't keep retrying on every refresh
+    // Increment attempts; only set the sticky failed flag once we cross
+    // the threshold. This keeps a single transient failure from blurring
+    // the cover and forcing a manual retry.
     const db = getDb();
     db.run(
-      "UPDATE entries SET download_failed = 1 WHERE user_id = ? AND hash = ?",
-      [user.id, `mag-${issueId}`]
+      `UPDATE entries
+         SET download_attempts = download_attempts + 1,
+             download_failed = CASE WHEN download_attempts + 1 >= ? THEN 1 ELSE download_failed END,
+             changed_at = datetime('now')
+       WHERE user_id = ? AND hash = ?`,
+      [PDF_FAILURE_THRESHOLD, user.id, `mag-${issueId}`]
     );
 
     throw notFound('PDF not found or unavailable');
@@ -174,7 +182,10 @@ magazinelib.post('/v1/magazinelib/subscribe', async (c) => {
   return c.json({ feed_id: newFeed?.id }, 201);
 });
 
-// PUT /v1/magazinelib/retry/:entryId — clear the download_failed flag and allow re-fetch
+// PUT /v1/magazinelib/retry/:entryId — actually re-attempt the PDF download.
+// Returns { ok: true } only when the PDF resolves and downloads successfully,
+// so the UI can give the user real feedback instead of optimistically clearing
+// the failure state.
 magazinelib.put('/v1/magazinelib/retry/:entryId', async (c) => {
   requireModule();
 
@@ -183,24 +194,37 @@ magazinelib.put('/v1/magazinelib/retry/:entryId', async (c) => {
 
   const db = getDb();
   const entry = db.query(
-    'SELECT id, hash FROM entries WHERE id = ? AND user_id = ? AND download_failed = 1'
+    'SELECT id, hash FROM entries WHERE id = ? AND user_id = ?'
   ).get(entryId, user.id) as { id: number; hash: string } | null;
 
   if (!entry) {
-    throw notFound('Entry not found or not marked as failed');
+    throw notFound('Entry not found');
   }
 
-  // Clear the failure flag
+  const issueId = entry.hash.replace('mag-', '');
+
+  // Clear the sticky flag while we try again, but keep download_attempts
+  // intact so repeated retries still accumulate toward the threshold.
+  // Keep the cached PDF — getPdf() validates it before serving and
+  // re-resolves only if missing or invalid.
   db.run('UPDATE entries SET download_failed = 0 WHERE id = ?', [entryId]);
 
-  // Also remove any stale cached PDF file so getPdf() will re-download
-  const issueId = entry.hash.replace('mag-', '');
-  const pdfPath = join(config.dataDir, 'cache', 'pdfs', `mag-${issueId}.pdf`);
-  if (existsSync(pdfPath)) {
-    try { unlinkSync(pdfPath); } catch { /* ignore */ }
+  try {
+    await getPdf(issueId);
+    db.run('UPDATE entries SET download_attempts = 0 WHERE id = ?', [entryId]);
+    return c.json({ ok: true });
+  } catch (err: any) {
+    log.warn('[magazinelib] Retry failed', { issueId, error: err.message });
+    db.run(
+      `UPDATE entries
+         SET download_attempts = download_attempts + 1,
+             download_failed = CASE WHEN download_attempts + 1 >= ? THEN 1 ELSE 0 END,
+             changed_at = datetime('now')
+       WHERE id = ?`,
+      [PDF_FAILURE_THRESHOLD, entryId]
+    );
+    return c.json({ ok: false, error: err.message }, 502);
   }
-
-  return c.json({ ok: true });
 });
 
 export default magazinelib;

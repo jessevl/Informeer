@@ -253,13 +253,17 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
 
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
+    if (retrying) return;
     setRetrying(true);
     try {
+      // Backend now actually re-attempts the download and returns 200 only on
+      // success. On failure it throws — keep the failed badge up.
       await api.retryMagazineDownload(parseInt(issue.id, 10));
       setLocalFailed(false);
       onRetry?.();
     } catch {
-      // still failed
+      setLocalFailed(true);
     } finally {
       setRetrying(false);
     }
@@ -294,31 +298,12 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
           <img
             src={coverImageUrl}
             alt={issue.title}
-            className={cn(
-              'w-full h-full object-cover',
-              localFailed && 'blur-sm brightness-50'
-            )}
+            className="w-full h-full object-cover"
             loading="lazy"
           />
         ) : (
-          <div className={cn(
-            'w-full h-full flex items-center justify-center',
-            localFailed && 'blur-sm brightness-50'
-          )}>
+          <div className="w-full h-full flex items-center justify-center">
             <BookOpen size={24} className="text-[var(--color-text-tertiary)] opacity-40" />
-          </div>
-        )}
-
-        {/* Failed overlay with retry */}
-        {localFailed && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-            <div className={cn(
-              'p-2 rounded-full bg-white/90 text-red-500 shadow-lg',
-              retrying && 'animate-spin'
-            )}>
-              <RefreshCw size={16} />
-            </div>
-            <span className="text-[10px] font-medium text-white/90 drop-shadow">Retry</span>
           </div>
         )}
 
@@ -372,6 +357,23 @@ function IssueThumb({ issue, feedTitle, index, isVisible, onOpen, onRetry, progr
           <div className="absolute top-1 left-1 flex items-center gap-0.5 rounded-full bg-[color-mix(in_srgb,var(--color-surface-base)_88%,transparent)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--color-text-secondary)] backdrop-blur-sm z-10">
             <Check size={7} />
             Read
+          </div>
+        )}
+
+        {/* PDF failed badge — cover stays visible; the outer button handles retry on click */}
+        {localFailed && (
+          <div
+            className={cn(
+              'absolute left-1 right-1 bottom-1 flex items-center justify-center gap-1',
+              'rounded px-1.5 py-1 text-[9px] font-medium',
+              'bg-red-500/85 text-white backdrop-blur-sm shadow-sm',
+              'pointer-events-none z-20',
+              'eink-media-badge',
+            )}
+            title="PDF could not be downloaded — click to retry"
+          >
+            <RefreshCw size={9} className={cn(retrying && 'animate-spin')} />
+            {retrying ? 'Retrying…' : 'PDF unavailable — retry'}
           </div>
         )}
 

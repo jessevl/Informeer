@@ -492,4 +492,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '014_download_attempts',
+    up(db) {
+      // Per-entry counter of consecutive on-demand PDF failures. The sticky
+      // download_failed flag is only set once attempts reaches the threshold,
+      // so a single transient VK/userapi.com hiccup no longer permanently
+      // blurs a working magazine cover. Reset to 0 on successful download.
+      db.run("ALTER TABLE entries ADD COLUMN download_attempts INTEGER NOT NULL DEFAULT 0");
+      // Clear all existing stuck flags — these were almost certainly set
+      // aggressively by the previous repairAssets logic.
+      db.run("UPDATE entries SET download_failed = 0 WHERE download_failed = 1");
+    },
+  },
 ];
