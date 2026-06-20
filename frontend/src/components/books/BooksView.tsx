@@ -247,14 +247,15 @@ export function BooksView() {
       return bookMatchesFilter(b, effectiveFilterBy, progressCache, offlineBookIds);
     });
 
+    const toEpoch = (iso: string | null | undefined) => {
+      if (!iso) return 0;
+      const t = new Date(iso).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
     const getActivityTime = (book: Book) =>
       Math.max(
-        recentBookActivity[book.id]
-          ? new Date(recentBookActivity[book.id]).getTime()
-          : 0,
-        progressCache[book.id]?.updated_at
-          ? new Date(progressCache[book.id].updated_at).getTime()
-          : 0
+        toEpoch(recentBookActivity[book.id]),
+        toEpoch(progressCache[book.id]?.updated_at)
       );
 
     switch (sortBy) {
