@@ -25,6 +25,8 @@ interface AuthState {
   login: (username: string, password: string, serverUrl: string) => Promise<boolean>;
   logout: () => void;
   checkAuth: () => Promise<boolean>;
+  /** Update the locally-cached password after a successful server-side change. */
+  setPassword: (password: string) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -88,6 +90,17 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: false,
           error: null,
         });
+      },
+
+      // Update the cached password (and the API client) after the user changes
+      // their password through the settings UI. Required because we use HTTP
+      // Basic Auth — subsequent requests must carry the new credentials.
+      setPassword: (password: string) => {
+        const username = get().username;
+        if (username) {
+          api.setCredentials(username, password);
+        }
+        set({ password });
       },
 
       // Check if stored credentials are still valid

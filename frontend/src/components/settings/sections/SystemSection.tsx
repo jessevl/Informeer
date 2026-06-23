@@ -35,6 +35,7 @@ import {
   SliderRow,
   formatBytes,
   NumberInput,
+  inputClass,
 } from '../ui';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -198,6 +199,98 @@ const OfflineContent: React.FC = () => {
         </div>
       </div>
     </div>
+  );
+};
+
+// ── Change Password Sub-section ───────────────────────────────────────────────
+
+const ChangePasswordForm: React.FC = () => {
+  const setPassword = useAuthStore((s) => s.setPassword);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setError(null);
+    if (!currentPassword || !newPassword) {
+      setError('Fill in both the current and new password');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirmation do not match');
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setError('New password must differ from the current one');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setPassword(newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to change password');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-2.5">
+      <div>
+        <p className="text-sm font-medium text-[var(--color-text-primary)]">Change password</p>
+        <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">
+          ADMIN_PASSWORD in the environment is only used the first time the database is seeded.
+          After that, change your password here.
+        </p>
+      </div>
+
+      {error && <StatusMessage type="error" message={error} />}
+
+      <input
+        type="password"
+        autoComplete="current-password"
+        placeholder="Current password"
+        value={currentPassword}
+        onChange={(e) => setCurrentPassword(e.target.value)}
+        className={inputClass}
+      />
+      <input
+        type="password"
+        autoComplete="new-password"
+        placeholder="New password (min 8 characters)"
+        value={newPassword}
+        onChange={(e) => setNewPassword(e.target.value)}
+        className={inputClass}
+      />
+      <input
+        type="password"
+        autoComplete="new-password"
+        placeholder="Confirm new password"
+        value={confirmPassword}
+        onChange={(e) => setConfirmPassword(e.target.value)}
+        className={inputClass}
+      />
+
+      <SaveButton
+        saving={saving}
+        success={success}
+        onClick={handleSave}
+        label="Change password"
+      />
+    </Card>
   );
 };
 
@@ -417,6 +510,8 @@ const SystemSection: React.FC = () => {
           </button>
         </div>
       </Card>
+
+      <ChangePasswordForm />
 
       <Separator />
 

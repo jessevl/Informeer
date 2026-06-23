@@ -421,6 +421,18 @@ class ApiClient {
     });
   }
 
+  // ==================== Account ====================
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request<{ ok: boolean }>('/me/password', {
+      method: 'PUT',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  }
+
   // ==================== Search (server-proxied) ====================
 
   async searchYouTubeChannels(query: string): Promise<YouTubeChannelResult[]> {
