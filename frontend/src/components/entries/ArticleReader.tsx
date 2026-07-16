@@ -773,7 +773,7 @@ export function ArticleReader({
       <div
         ref={surfaceRef}
         className={cn(
-          'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--color-background)]',
+          'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--color-surface-primary)]',
           !einkMode && 'animate-slide-in-right'
         )}
         style={pullDismiss > 0 ? {
@@ -961,8 +961,8 @@ export function ArticleReader({
               defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
               showMarginControls={false}
               showMaxWidthControl={true}
-              maxPaginatedColumns={2}
-              paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
+              maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
+              paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'This view is too narrow for two columns.'}
             />
           </>
         )}
@@ -1077,8 +1077,8 @@ export function ArticleReader({
                 defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
                 showMarginControls={false}
                 showMaxWidthControl={true}
-                maxPaginatedColumns={2}
-                paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
+                maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
+                paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'This view is too narrow for two columns.'}
               />
             </>
           )}
@@ -1247,8 +1247,8 @@ export function ArticleReader({
             defaultSettings={DEFAULT_ARTICLE_TYPOGRAPHY}
             showMarginControls={false}
             showMaxWidthControl={true}
-            maxPaginatedColumns={2}
-            paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'Two columns are available, but this width is tighter than recommended.'}
+            maxPaginatedColumns={canUseTwoColumnLayout ? 2 : 1}
+            paginatedColumnHint={canUseTwoColumnLayout ? undefined : 'This view is too narrow for two columns.'}
           />
         </>
       )}

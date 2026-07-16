@@ -107,7 +107,12 @@ export function useArticlePagination({
   }, [pageWidth]);
 
   const canUseTwoColumnLayout = pageWidth >= RECOMMENDED_TWO_COLUMN_PAGE_WIDTH_PX * 2 + ARTICLE_PAGE_GAP_PX;
-  const effectiveColumnCount: 1 | 2 = isPaginated && columnCount === 2 ? 2 : 1;
+  // Two columns are only used when the reader has explicitly opted in (columnCount === 2)
+  // AND the measured page is wide enough. This mirrors the EPUB reader's landscape
+  // auto-spread: a wide viewport (unfolded device / landscape) resolves to two columns,
+  // a narrow one (portrait phone) falls back to one, without the user toggling anything.
+  // pageWidth is 0 until the first measurement lands, so fall back to single-column then.
+  const effectiveColumnCount: 1 | 2 = isPaginated && columnCount === 2 && canUseTwoColumnLayout ? 2 : 1;
 
   const getPageMetrics = useCallback((scroller: HTMLElement) => {
     const step = getPageStep(scroller);
