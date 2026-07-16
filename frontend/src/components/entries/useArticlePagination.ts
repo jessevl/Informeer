@@ -126,10 +126,15 @@ export function useArticlePagination({
         ? (pageWidth - ARTICLE_PAGE_GAP_PX) / 2
         : pageWidth
       : 0;
-    const measuredColumnWidth = flowStyle ? Number.parseFloat(flowStyle.columnWidth || '0') : fallbackColumnWidth;
-    const columnWidth = Number.isFinite(measuredColumnWidth) && measuredColumnWidth > 0
-      ? measuredColumnWidth
-      : fallbackColumnWidth;
+    // Rendered columns stretch to fill the flow, so their true stride is the geometric
+    // width derived from the measured page width — NOT the specified `column-width`, which
+    // carries the two-column fit epsilon and would under-measure the stride (inflating the
+    // column count by the odd blank page on long articles). Prefer the geometric value once
+    // the page width is known; fall back to the computed value only before first measure.
+    const measuredColumnWidth = flowStyle ? Number.parseFloat(flowStyle.columnWidth || '0') : 0;
+    const columnWidth = fallbackColumnWidth > 0
+      ? fallbackColumnWidth
+      : (Number.isFinite(measuredColumnWidth) && measuredColumnWidth > 0 ? measuredColumnWidth : 0);
     const columnStride = columnWidth > 0 ? columnWidth + columnGap : step;
     
     const renderedTrailingBlankColumns = flow?.querySelectorAll('[data-article-trailing-spacer]').length ?? 0;

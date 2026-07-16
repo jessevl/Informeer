@@ -24,6 +24,10 @@ import type { CSSProperties } from 'react';
 const ARTICLE_FONT_STYLE_ID = 'informeer-article-font-faces';
 const PAGINATED_HEADER_OFFSET = 'calc(3.5rem + env(safe-area-inset-top, 0px))';
 const PAGINATED_BOTTOM_MARGIN = 'calc(2.5rem + env(safe-area-inset-bottom, 0px))';
+// Slack subtracted from the ideal two-column width so two columns fit robustly despite
+// sub-pixel rounding between the measured page width and the rendered flow width. Large
+// enough to clear rounding, far too small to ever admit a third column. See articleFlowStyle.
+const TWO_COLUMN_FIT_EPSILON_PX = 8;
 
 interface ArticleContentProps {
   entry: Entry;
@@ -289,8 +293,17 @@ export function ArticleContent({
       };
   const articleFlowStyle: CSSProperties | undefined = isPaginated
     ? {
+        // `column-width` is a *minimum* target: the browser fits as many columns of at
+        // least this width as it can, then stretches them to fill. Setting it to exactly
+        // half the page (`(W - gap) / 2`) makes two columns fit only when the rendered
+        // flow width is >= the measured page width to the sub-pixel — a knife-edge that
+        // collapses to a single full-width column whenever rounding leaves the flow a hair
+        // narrower (and flips back to two as the viewport resizes). Subtracting a small
+        // epsilon leaves slack so two columns fit robustly at every width. Columns still
+        // render full-width (the browser stretches to fill), and the epsilon is far too
+        // small to ever admit a third column, so this only stabilises the count.
         columnWidth: resolvedColumnCount === 2
-          ? `calc((var(--article-page-width, 100vw) - ${columnGapPx}px) / 2)`
+          ? `calc((var(--article-page-width, 100vw) - ${columnGapPx}px) / 2 - ${TWO_COLUMN_FIT_EPSILON_PX}px)`
           : `var(--article-page-width, 100vw)`,
         columnGap: `${columnGapPx}px`,
         columnFill: 'auto',
