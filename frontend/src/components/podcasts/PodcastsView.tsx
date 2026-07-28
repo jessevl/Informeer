@@ -494,7 +494,8 @@ export function PodcastsView({
             </div>
             <div
               ref={recentScrollRef}
-              className="flex gap-3 overflow-x-auto pb-2 px-4 scrollbar-hide"
+              className="flex gap-3 overflow-x-auto pb-2 px-4 scrollbar-hide touch-pan-x"
+              style={{ touchAction: 'pan-x' }}
             >
               {recentRowEpisodes.map(entry => {
                 const enc = getAudioEnclosure(entry)!;

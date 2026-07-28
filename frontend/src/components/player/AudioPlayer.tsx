@@ -6,7 +6,7 @@
  * Mobile: Positions above the floating nav bar
  */
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { 
   Play, 
   Pause, 
@@ -35,6 +35,7 @@ import { useTTSStore } from '@/stores/tts';
 import { PodcastArtwork } from '@/components/podcasts/PodcastArtwork';
 import { getCachedBlob } from '@/lib/offline/blob-cache';
 import { extractChapters, type PodcastChapter } from '@/lib/podcast-chapters';
+import { getCachedPodcastArtwork, getPodcastArtwork } from '@/api/podcastArtwork';
 
 // Format time in mm:ss or hh:mm:ss
 function formatTime(seconds: number): string {
@@ -214,7 +215,7 @@ export function AudioPlayer() {
   }, []);
 
   // Extract chapters from episode show notes
-  const chapters = useMemo(() => 
+  const chapters = useMemo(() =>
     currentEntry?.content ? extractChapters(currentEntry.content) : [],
     [currentEntry?.id, currentEntry?.content]
   );
@@ -225,6 +226,120 @@ export function AudioPlayer() {
     }
     return chapters[0];
   }, [chapters, currentTime]);
+
+  const hasNextQueueItem = mediaQueue.length > 0 || queue.length > 0;
+
+  // Advance to the next item in the unified media queue (audio/video/TTS) or
+  // the legacy per-episode queue. Shared by the Next button, auto-advance on
+  // end-of-track, and the Media Session "next track" action.
+  const playNextItem = useCallback((): boolean => {
+    if (mediaQueue.length > 0) {
+      const next = popNext();
+      if (next?.mediaType === 'audio') {
+        play(next.enclosure, next.entry);
+        return true;
+      }
+      if (next?.mediaType === 'video') {
+        if (next.youtubeId) {
+          playYouTube(next.youtubeId, next.entry);
+          return true;
+        }
+        if (next.enclosure) {
+          playVideo(next.enclosure, next.entry);
+          return true;
+        }
+      }
+      if (next?.mediaType === 'tts') {
+        const { generate, initModel, modelStatus } = useTTSStore.getState();
+        if (modelStatus === 'idle') initModel();
+        generate(next.text, next.entry);
+        return true;
+      }
+    }
+    if (queue.length > 0) {
+      playNext();
+      return true;
+    }
+    return false;
+  }, [mediaQueue, popNext, play, playYouTube, playVideo, queue.length, playNext]);
+
+  // ---- Media Session integration ----
+  // Populates the OS-level "now playing" UI (Android notification / lock
+  // screen, iOS Control Center) so backgrounding the app during playback
+  // shows the right title, show name, and artwork instead of nothing.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentEntry) return;
+    let cancelled = false;
+
+    const setMetadata = (artworkUrl: string | null) => {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentEntry.title,
+        artist: currentEntry.feed?.title || '',
+        album: currentEntry.feed?.title || '',
+        artwork: artworkUrl ? [{ src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }] : [],
+      });
+    };
+
+    const cachedArtwork = getCachedPodcastArtwork(currentEntry.feed_id, 512);
+    setMetadata(cachedArtwork);
+
+    if (!cachedArtwork) {
+      getPodcastArtwork(currentEntry.feed_id, currentEntry.feed?.title || '', 512).then((url) => {
+        if (cancelled || !url) return;
+        setMetadata(url);
+      });
+    }
+
+    return () => { cancelled = true; };
+  }, [currentEntry?.id, currentEntry?.title, currentEntry?.feed_id, currentEntry?.feed?.title]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentEntry) return;
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying, currentEntry]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentEntry) return;
+
+    navigator.mediaSession.setActionHandler('play', () => resume());
+    navigator.mediaSession.setActionHandler('pause', () => pause());
+    navigator.mediaSession.setActionHandler('stop', () => stop());
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      const audio = audioRef.current;
+      const time = Math.max(0, (audio?.currentTime ?? 0) - (details.seekOffset || 15));
+      if (audio) audio.currentTime = time;
+      setCurrentTime(time);
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      const audio = audioRef.current;
+      const time = Math.min(audio?.duration || Infinity, (audio?.currentTime ?? 0) + (details.seekOffset || 30));
+      if (audio) audio.currentTime = time;
+      setCurrentTime(time);
+    });
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime == null) return;
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = details.seekTime;
+      setCurrentTime(details.seekTime);
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = 0;
+      setCurrentTime(0);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', hasNextQueueItem ? () => { playNextItem(); } : null);
+
+    return () => {
+      navigator.mediaSession.setActionHandler('play', null);
+      navigator.mediaSession.setActionHandler('pause', null);
+      navigator.mediaSession.setActionHandler('stop', null);
+      navigator.mediaSession.setActionHandler('seekbackward', null);
+      navigator.mediaSession.setActionHandler('seekforward', null);
+      navigator.mediaSession.setActionHandler('seekto', null);
+      navigator.mediaSession.setActionHandler('previoustrack', null);
+      navigator.mediaSession.setActionHandler('nexttrack', null);
+    };
+  }, [currentEntry, resume, pause, stop, setCurrentTime, hasNextQueueItem, playNextItem]);
 
   if (!currentEnclosure || !currentEntry) return null;
 
@@ -237,12 +352,22 @@ export function AudioPlayer() {
     { speed: 1.75, label: '1.75x' },
     { speed: 2, label: '2x Catch-up' },
   ];
-  const hasNextQueueItem = mediaQueue.length > 0 || queue.length > 0;
 
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
     if (audio) {
       setCurrentTime(audio.currentTime);
+      if ('mediaSession' in navigator && audio.duration > 0 && isFinite(audio.duration)) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: audio.duration,
+            playbackRate: audio.playbackRate || 1,
+            position: Math.min(audio.currentTime, audio.duration),
+          });
+        } catch {
+          // Some browsers throw if called with a stale/invalid combination
+        }
+      }
     }
   };
 
@@ -260,34 +385,7 @@ export function AudioPlayer() {
 
   const handleEnded = () => {
     syncProgress();
-    if (mediaQueue.length > 0) {
-      const next = popNext();
-      if (next?.mediaType === 'audio') {
-        play(next.enclosure, next.entry);
-        return;
-      }
-      if (next?.mediaType === 'video') {
-        if (next.youtubeId) {
-          playYouTube(next.youtubeId, next.entry);
-          return;
-        }
-        if (next.enclosure) {
-          playVideo(next.enclosure, next.entry);
-          return;
-        }
-      }
-      if (next?.mediaType === 'tts') {
-        // Transition to TTS player — generate() will stop audio internally
-        const { generate, initModel, modelStatus } = useTTSStore.getState();
-        if (modelStatus === 'idle') initModel();
-        generate(next.text, next.entry);
-        return;
-      }
-    }
-    // Auto-play next in queue if available
-    if (queue.length > 0) {
-      playNext();
-    } else {
+    if (!playNextItem()) {
       stop();
     }
   };
@@ -567,28 +665,7 @@ export function AudioPlayer() {
 
               {/* Next */}
               <button
-                onClick={() => {
-                  if (mediaQueue.length > 0) {
-                    const next = popNext();
-                    if (next?.mediaType === 'audio') {
-                      play(next.enclosure, next.entry);
-                      return;
-                    }
-                    if (next?.mediaType === 'video') {
-                      if (next.youtubeId) {
-                        playYouTube(next.youtubeId, next.entry);
-                        return;
-                      }
-                      if (next.enclosure) {
-                        playVideo(next.enclosure, next.entry);
-                        return;
-                      }
-                    }
-                  }
-                  if (queue.length > 0) {
-                    playNext();
-                  }
-                }}
+                onClick={() => playNextItem()}
                 disabled={!hasNextQueueItem}
                 className={cn(
                   "p-2 rounded-full transition-colors",

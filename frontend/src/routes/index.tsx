@@ -28,6 +28,7 @@ import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { TTSMiniPlayer } from '@/components/tts/TTSMiniPlayer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
+import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 import type { Entry, Feed } from '@/types/api';
 
 const SIDEBAR_PIN_MODE_STORAGE_KEY = 'informeer-sidebar-pin-mode';
@@ -269,6 +270,18 @@ function HomePage() {
       });
     }
   }, [selectedChannelId, navigationHistory, setFilter]);
+
+  // Let Android/iOS PWA back gestures close the currently open screen
+  // (reader, drill-down view, or modal) instead of exiting the whole app.
+  const isReaderOpen = !!selectedEntry && mediaType !== 'audio' && mediaType !== 'video';
+  useBackGestureClose(isReaderOpen, handleGoBack);
+  useBackGestureClose(selectedChannelId !== null, handleGoBack);
+  useBackGestureClose(navigationHistory.length > 0, handleGoBack);
+  useBackGestureClose(searchOpen, () => setSearchOpen(false));
+  useBackGestureClose(settingsOpen, () => setSettingsOpen(false));
+  useBackGestureClose(addFeedOpen, () => { setAddFeedOpen(false); setAddFeedInitialCategory(undefined); });
+  useBackGestureClose(editFeedOpen, () => { setEditFeedOpen(false); setEditingFeed(null); });
+  useBackGestureClose(feedManagementOpen, () => setFeedManagementOpen(false));
 
   // Handle video channel selection
   const handleSelectChannel = useCallback((feed: Feed | null) => {

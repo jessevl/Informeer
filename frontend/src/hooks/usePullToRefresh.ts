@@ -6,6 +6,31 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 
+/**
+ * Walk up from `node` (inclusive) to `boundary` (inclusive) looking for a
+ * scrollable ancestor that isn't at its own scroll-top. Views like
+ * PodcastsView nest a second, independently-scrollable list (e.g. the shows
+ * grid) inside the pull-to-refresh container. Without this check we only
+ * ever look at the outer container's scrollTop, which can stay 0 forever
+ * while the inner list is scrolled down — making every further downward
+ * touch move look like "at the top, start pulling" and hijacking the
+ * gesture into a pull-to-refresh instead of scrolling the inner list back up.
+ */
+function hasScrolledNestedAncestor(node: Node | null, boundary: HTMLElement): boolean {
+  while (node && node !== boundary.parentElement) {
+    if (node instanceof HTMLElement) {
+      const style = getComputedStyle(node);
+      const canScrollY = style.overflowY === 'auto' || style.overflowY === 'scroll';
+      if (canScrollY && node.scrollHeight > node.clientHeight && node.scrollTop > 0) {
+        return true;
+      }
+      if (node === boundary) break;
+    }
+    node = node.parentNode;
+  }
+  return false;
+}
+
 interface UsePullToRefreshOptions {
   /** The scrollable element ref */
   scrollRef: React.RefObject<HTMLElement | null>;
@@ -45,6 +70,7 @@ export function usePullToRefresh({
   const pullingRef = useRef(false);
   const refreshingRef = useRef(false);
   const pullDistanceRef = useRef(0);
+  const touchTargetRef = useRef<Node | null>(null);
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (!enabled || refreshingRef.current) return;
@@ -52,9 +78,12 @@ export function usePullToRefresh({
     const el = scrollRef.current;
     if (!el) return;
 
-    // Only start pull if scrolled to top
+    // Only start pull if scrolled to top — including any nested scrollable
+    // list under the touch point, not just the outer container.
     if (el.scrollTop > 0) return;
+    if (hasScrolledNestedAncestor(e.target as Node | null, el)) return;
 
+    touchTargetRef.current = e.target as Node | null;
     startYRef.current = e.touches[0].clientY;
   }, [enabled, scrollRef]);
 
@@ -68,8 +97,9 @@ export function usePullToRefresh({
     const currentY = e.touches[0].clientY;
     const diff = currentY - startYRef.current;
 
-    // Only activate if pulling down AND at top of scroll
-    if (diff <= 0 || el.scrollTop > 0) {
+    // Only activate if pulling down AND at top of scroll (outer container
+    // and any nested scrollable list under the touch point)
+    if (diff <= 0 || el.scrollTop > 0 || hasScrolledNestedAncestor(touchTargetRef.current, el)) {
       if (pullingRef.current) {
         pullingRef.current = false;
         setIsPulling(false);
