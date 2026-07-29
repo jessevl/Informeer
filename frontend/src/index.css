@@ -443,8 +443,19 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
   animation: fade-out 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/*
+ * fill-mode is `backwards`, not `both`: this wraps elements (e.g. the
+ * floating nav bar) whose child has `backdrop-filter`. A `transform` left
+ * sitting on the ancestor after the animation ends — even the harmless-
+ * looking identity `translateY(0) scale(1)` that `forwards`/`both` would
+ * leave behind — puts that ancestor in its own compositing layer, which on
+ * several Chromium/WebView builds cuts the child's backdrop-filter off from
+ * the real page behind it: it still paints the tint, just with no blur.
+ * `backwards` gives the same entrance animation but lets `transform` revert
+ * to `none` once it's done.
+ */
 .animate-slide-up {
-  animation: slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .animate-slide-down {
@@ -479,8 +490,10 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
   animation: bounce-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/* Same reasoning as .animate-slide-up above — this wraps the audio/video/TTS
+ * mini-players, whose card has `backdrop-filter`. */
 .animate-player-enter {
-  animation: player-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: player-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
 }
 
 .animate-backdrop-in {
