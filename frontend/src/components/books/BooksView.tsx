@@ -158,7 +158,7 @@ export function BooksView() {
 
   // Library sort/filter/search state
   const [sortBy, setSortBy] = useState<LibrarySortMode>('recent-activity');
-  const [filterBy, setFilterBy] = useState<LibraryFilterMode>('all');
+  const [filterBy, setFilterBy] = useState<LibraryFilterMode>('unfinished');
   const [librarySearch, setLibrarySearch] = useState('');
   const [libraryPage, setLibraryPage] = useState(1);
   const { effectiveOffline } = useEffectiveOfflineState();
