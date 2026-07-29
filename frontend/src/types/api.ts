@@ -174,6 +174,9 @@ export interface Book {
   metadata: Record<string, string>;
   created_at: string;
   updated_at: string;
+  /** Server-side reading progress, included with the list so a fresh
+   * device/browser knows a book is finished without opening it first. */
+  reading_progress?: BookProgress | null;
 }
 
 export interface BooksResponse {

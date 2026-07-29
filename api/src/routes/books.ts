@@ -62,6 +62,11 @@ interface BookRow {
   metadata: string;
   created_at: string;
   updated_at: string;
+  // Only present when the row came from a query joined against book_progress
+  progress_cfi?: string | null;
+  progress_percentage?: number | null;
+  progress_chapter?: string | null;
+  progress_updated_at?: string | null;
 }
 
 function formatBook(row: BookRow) {
@@ -81,6 +86,16 @@ function formatBook(row: BookRow) {
     metadata: JSON.parse(row.metadata || '{}'),
     created_at: row.created_at,
     updated_at: row.updated_at,
+    // Included so a fresh device/browser knows a book's progress (and
+    // whether it's finished) without first having to open it in the
+    // reader — the reader's own progress endpoint remains the source of
+    // truth for the CFI while actively reading.
+    reading_progress: row.progress_updated_at != null ? {
+      cfi: row.progress_cfi || '',
+      percentage: row.progress_percentage || 0,
+      chapter: row.progress_chapter || '',
+      updated_at: row.progress_updated_at,
+    } : null,
   };
 }
 
@@ -101,20 +116,34 @@ books.get('/v1/books', (c) => {
   let query: string;
   let params: any[];
 
+  const progressJoin = `
+    LEFT JOIN book_progress
+      ON book_progress.book_id = books.id AND book_progress.user_id = books.user_id
+  `;
+  const progressColumns = `
+    books.*,
+    book_progress.cfi AS progress_cfi,
+    book_progress.percentage AS progress_percentage,
+    book_progress.chapter AS progress_chapter,
+    book_progress.updated_at AS progress_updated_at
+  `;
+
   if (search) {
     query = `
-      SELECT * FROM books
-      WHERE user_id = ? AND (title LIKE ? OR author LIKE ?)
-      ORDER BY updated_at DESC
+      SELECT ${progressColumns} FROM books
+      ${progressJoin}
+      WHERE books.user_id = ? AND (books.title LIKE ? OR books.author LIKE ?)
+      ORDER BY books.updated_at DESC
       LIMIT ? OFFSET ?
     `;
     const like = `%${search}%`;
     params = [user.id, like, like, limit, offset];
   } else {
     query = `
-      SELECT * FROM books
-      WHERE user_id = ?
-      ORDER BY updated_at DESC
+      SELECT ${progressColumns} FROM books
+      ${progressJoin}
+      WHERE books.user_id = ?
+      ORDER BY books.updated_at DESC
       LIMIT ? OFFSET ?
     `;
     params = [user.id, limit, offset];

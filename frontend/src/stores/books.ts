@@ -60,6 +60,23 @@ function normalizeBookPercentage(percentage: number): number {
   return clamped >= 0.995 ? 1 : clamped;
 }
 
+// Decide whether server-reported progress should replace what's cached
+// locally. Timestamp comparison is unreliable here: the server timestamp is
+// always written 1500ms+ after the client timestamp (sync debounce + network
+// latency), so a stale server page can appear "newer" than a fresh local
+// page. Instead we prefer whichever position is further ahead — the 2%
+// threshold matches the remote sync hook and avoids noise from percentage
+// rounding differences. Cross-device advancement beyond this gap is still
+// caught here; live cross-device sync is handled separately by
+// useRemoteProgressSync (which shows a confirmation toast).
+function pickServerProgress(local: BookProgress | undefined, server: BookProgress): BookProgress | null {
+  const localPct = local?.percentage ?? 0;
+  const serverPct = server.percentage;
+  const serverIsMateriallyAhead = serverPct - localPct > 0.02;
+  const localHasNoPosition = !local?.cfi;
+  return localHasNoPosition || serverIsMateriallyAhead ? server : null;
+}
+
 export const useBooksStore = create<BooksState>()(
   persist(
     (set, get) => ({
@@ -86,10 +103,23 @@ export const useBooksStore = create<BooksState>()(
         }
         try {
           const response = await api.getBooks({ search, limit: 200 });
-          set({
-            books: response.books,
-            total: response.total,
-            isLoading: false,
+          set(state => {
+            const progressCache = { ...state.progressCache };
+            for (const book of response.books) {
+              if (!book.reading_progress) continue;
+              const normalized = {
+                ...book.reading_progress,
+                percentage: normalizeBookPercentage(book.reading_progress.percentage),
+              };
+              const winner = pickServerProgress(progressCache[book.id], normalized);
+              if (winner) progressCache[book.id] = winner;
+            }
+            return {
+              books: response.books,
+              total: response.total,
+              isLoading: false,
+              progressCache,
+            };
           });
           markApiSuccess();
         } catch (err: any) {
@@ -256,36 +286,19 @@ export const useBooksStore = create<BooksState>()(
 
           if (normalizedProgress.cfi || normalizedProgress.percentage > 0 || normalizedProgress.chapter) {
             set(state => {
-              const local = state.progressCache[bookId];
+              const winner = pickServerProgress(state.progressCache[bookId], normalizedProgress);
+              if (!winner) return {};
+
               const isBookActive = state.selectedBook?.id === bookId;
-
-              // Prefer whichever position is further ahead. Timestamp comparison is
-              // unreliable here: the server timestamp is always written 1500ms+ after
-              // the client timestamp (sync debounce + network latency), so a stale
-              // server page can appear "newer" than a fresh local page.
-              // The 2% threshold matches the remote sync hook and avoids noise from
-              // percentage rounding differences. Cross-device advancement beyond this
-              // gap is still caught here; live cross-device sync is handled separately
-              // by useRemoteProgressSync (which shows a confirmation toast).
-              const localPct = local?.percentage ?? 0;
-              const serverPct = normalizedProgress.percentage;
-              const serverIsMateriallyAhead = serverPct - localPct > 0.02;
-              const localHasNoPosition = !local?.cfi;
-              const serverShouldWin = localHasNoPosition || serverIsMateriallyAhead;
-
-              if (serverShouldWin) {
-                return {
-                  currentCfi: isBookActive ? normalizedProgress.cfi : state.currentCfi,
-                  currentPercentage: isBookActive ? normalizedProgress.percentage : state.currentPercentage,
-                  currentChapter: isBookActive ? normalizedProgress.chapter : state.currentChapter,
-                  progressCache: {
-                    ...state.progressCache,
-                    [bookId]: normalizedProgress,
-                  },
-                };
-              }
-
-              return {};
+              return {
+                currentCfi: isBookActive ? winner.cfi : state.currentCfi,
+                currentPercentage: isBookActive ? winner.percentage : state.currentPercentage,
+                currentChapter: isBookActive ? winner.chapter : state.currentChapter,
+                progressCache: {
+                  ...state.progressCache,
+                  [bookId]: winner,
+                },
+              };
             });
           }
           return normalizedProgress;
