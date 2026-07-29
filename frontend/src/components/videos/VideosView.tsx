@@ -50,11 +50,11 @@ function isYouTubeShort(entry: Entry): boolean {
 }
 
 function getVideoGridColumns(width: number): number {
-  if (width >= 1700) return 6;
-  if (width >= 1400) return 5;
-  if (width >= 1100) return 4;
-  if (width >= 760) return 3;
-  return 2;
+  if (width >= 1700) return 5;
+  if (width >= 1400) return 4;
+  if (width >= 1100) return 3;
+  if (width >= 760) return 2;
+  return 1;
 }
 
 function useVideoGridColumns(): number {
