@@ -23,6 +23,7 @@ import { useOfflineStore, useOfflineRegistry } from '@/stores/offline';
 import { useFeedsStore } from '@/stores/feeds';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 
 /** Breakpoint → column count, must stay in sync with the grid-cols-* classes below */
 function useGridColumns() {
@@ -164,6 +165,10 @@ export function MagazinesView({
     unsubscribe,
     isMagazineEntry,
   } = useMagazinesStore();
+
+  // Let an Android/iOS PWA back gesture close the PDF viewer and return to
+  // the magazines overview instead of exiting the app.
+  useBackGestureClose(isPdfViewerOpen, closePdfViewer);
 
   const deleteFeed = useFeedsStore(s => s.deleteFeed);
 

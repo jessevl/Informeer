@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "Informeer",
   "short_name": "Informeer",
   "description": "A self-hosted feed reader for RSS, podcasts, YouTube, magazines, and books",

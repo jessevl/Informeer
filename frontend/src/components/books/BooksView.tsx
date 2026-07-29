@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useBooksStore } from '@/stores/books';
 import { useModulesStore } from '@/stores/modules';
+import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 import { BookGrid } from './BookGrid';
 import { EPUBReader } from './EPUBReader';
 import { ZLibSearch } from './ZLibSearch';
@@ -133,6 +134,10 @@ export function BooksView() {
     closeReader,
     setYearlyBooksGoal,
   } = useBooksStore();
+
+  // Let an Android/iOS PWA back gesture close the EPUB reader and return to
+  // the books overview instead of exiting the app.
+  useBackGestureClose(isReaderOpen, closeReader);
 
   // Active sub-view
   const [activeTab, setActiveTab] = useState<BooksTab>('reading');

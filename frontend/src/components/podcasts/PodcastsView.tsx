@@ -38,6 +38,7 @@ import { api } from '@/api/client';
 import { useFeedsStore } from '@/stores/feeds';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { useEffectiveOfflineState } from '@/hooks/useEffectiveOfflineState';
+import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 
 
 type PodcastViewMode = 'shows' | 'saved';
@@ -222,6 +223,10 @@ export function PodcastsView({
   // Stacks selection state
   const [selectedFeedId, setSelectedFeedId] = useState<number | null>(null);
   const [mountedFeedId, setMountedFeedId] = useState<number | null>(null);
+
+  // Let an Android/iOS PWA back gesture collapse the expanded episodes row
+  // instead of exiting the app.
+  useBackGestureClose(selectedFeedId !== null, () => setSelectedFeedId(null));
 
   // Pull-to-refresh
   const defaultRefresh = useCallback(async () => {}, []);
