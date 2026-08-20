@@ -15,9 +15,17 @@ import { useModulesStore } from '@/stores/modules';
 import { useBooksStore } from '@/stores/books';
 import { useMagazinesStore } from '@/stores/magazines';
 import { useEntriesStore } from '@/stores/entries';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 import type { Category, ZLibSearchResult, ZLibDownloadStatus } from '@/types/api';
 
 type FeedType = 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib';
+
+// Podcasts/YouTube are gated off (see @/config/features) — never resolve to
+// those tabs even if a stale initialTab prop or persisted value asks for one.
+function resolveFeedType(type: FeedType | undefined): FeedType {
+  if (!PODCASTS_YOUTUBE_ENABLED && (type === 'youtube' || type === 'podcasts')) return 'rss';
+  return type ?? 'rss';
+}
 
 interface AddFeedModalProps {
   isOpen: boolean;
@@ -228,7 +236,7 @@ function ZLibPanel({ onClose: _onClose }: { onClose: () => void }) {
 export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialCategory }: AddFeedModalProps) {
   const magEnabled = useModulesStore((s) => s.modules.magazinelib);
   const booksZlibEnabled = useModulesStore((s) => s.modules.booksZlib);
-  const [feedType, setFeedType] = useState<FeedType>(initialTab ?? 'rss');
+  const [feedType, setFeedType] = useState<FeedType>(resolveFeedType(initialTab));
   const [url, setUrl] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -254,7 +262,7 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
   // Reset state when modal opens or feed type changes
   useEffect(() => {
     if (isOpen) {
-      setFeedType(initialTab ?? 'rss');
+      setFeedType(resolveFeedType(initialTab));
       setUrl('');
       setSearchQuery('');
       const userCategories = categories.filter(c => !c.is_system);
@@ -528,18 +536,20 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
             <Rss size={16} />
             RSS
           </button>
-          <button
-            onClick={() => setFeedType('youtube')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
-              feedType === 'youtube'
-                ? 'text-[var(--color-accent-fg)] border-b-2 border-[var(--color-accent-fg)]'
-                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-            )}
-          >
-            <Youtube size={16} />
-            YouTube
-          </button>
+          {PODCASTS_YOUTUBE_ENABLED && (
+            <button
+              onClick={() => setFeedType('youtube')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
+                feedType === 'youtube'
+                  ? 'text-[var(--color-accent-fg)] border-b-2 border-[var(--color-accent-fg)]'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <Youtube size={16} />
+              YouTube
+            </button>
+          )}
           <button
             onClick={() => setFeedType('reddit')}
             className={cn(
@@ -552,18 +562,20 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
             <MessageCircle size={16} />
             Reddit
           </button>
-          <button
-            onClick={() => setFeedType('podcasts')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
-              feedType === 'podcasts'
-                ? 'text-[var(--color-accent-fg)] border-b-2 border-[var(--color-accent-fg)]'
-                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-            )}
-          >
-            <Headphones size={16} />
-            Podcasts
-          </button>
+          {PODCASTS_YOUTUBE_ENABLED && (
+            <button
+              onClick={() => setFeedType('podcasts')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
+                feedType === 'podcasts'
+                  ? 'text-[var(--color-accent-fg)] border-b-2 border-[var(--color-accent-fg)]'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <Headphones size={16} />
+              Podcasts
+            </button>
+          )}
           {magEnabled && (
             <button
               onClick={() => setFeedType('magazinelib')}

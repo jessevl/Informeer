@@ -19,6 +19,7 @@ import { useMediaQueueStore } from '@/stores/mediaQueue';
 import { ImageGallery } from '@/components/reader/ImageGallery';
 import { EPUB_FONT_FACE_CSS } from '@/lib/epub-fonts';
 import { getTypographyFontFamily, isOriginalTypography } from '@/lib/typography';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 import type { CSSProperties } from 'react';
 
 const ARTICLE_FONT_STYLE_ID = 'informeer-article-font-faces';
@@ -138,14 +139,16 @@ export function ArticleContent({
   const readerContent = isControlled ? readerContentControlled : readerContentInternal;
   const effectiveFetchError = isControlled ? fetchError : fetchErrorInternal;
   
-  // YouTube ID from URL
-  const youtubeId = isYouTubeUrl(entry.url) ? extractYouTubeId(entry.url) : null;
-  
+  // YouTube ID from URL. Podcasts/YouTube are gated off (see
+  // @/config/features), so this stays null and the article falls back to
+  // normal article rendering (cover image, no custom player).
+  const youtubeId = PODCASTS_YOUTUBE_ENABLED && isYouTubeUrl(entry.url) ? extractYouTubeId(entry.url) : null;
+
   // Check for audio enclosures (podcasts)
-  const audioEnclosure = entry.enclosures?.find(e => e.mime_type?.startsWith('audio/'));
+  const audioEnclosure = PODCASTS_YOUTUBE_ENABLED ? entry.enclosures?.find(e => e.mime_type?.startsWith('audio/')) : undefined;
   
   // Check for video enclosures
-  const videoEnclosure = getVideoEnclosure(entry);
+  const videoEnclosure = PODCASTS_YOUTUBE_ENABLED ? getVideoEnclosure(entry) : null;
   const isVideoCurrentlyPlaying = currentVideoEntry?.id === entry.id;
   const isVideoInQueue = isVideoQueued(entry.id);
   
@@ -226,8 +229,10 @@ export function ArticleContent({
   const { html: strippedContent, youtubeIds: embeddedYouTubeIds } = stripYouTubeEmbeds(articleContent);
   articleContent = strippedContent;
   
-  // Use entry URL YouTube ID or first embedded YouTube ID
-  const effectiveYouTubeId = youtubeId || embeddedYouTubeIds[0] || null;
+  // Use entry URL YouTube ID or first embedded YouTube ID. Podcasts/YouTube
+  // are gated off (see @/config/features): embeds stay stripped above but
+  // are never replaced with a player.
+  const effectiveYouTubeId = PODCASTS_YOUTUBE_ENABLED ? (youtubeId || embeddedYouTubeIds[0] || null) : null;
 
   // ─── Image gallery mode ──────────────────────────────────────
   const contentRef = useRef<HTMLDivElement>(null);

@@ -22,6 +22,19 @@ export default defineConfig({
       manifest: false, // Use existing public/manifest.json
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,ico,png,svg,woff2}'],
+        // Podcasts/YouTube are gated off (see src/config/features.ts) via
+        // lazy-loaded chunks that are never requested at runtime. Exclude
+        // them here too, otherwise the service worker would precache them
+        // in the background regardless of the flag.
+        globIgnores: [
+          '**/PodcastsView-*.js',
+          '**/VideosView-*.js',
+          '**/AudioPlayer-*.js',
+          '**/VideoPlayer-*.js',
+          '**/PodcastArtwork-*.js',
+          '**/hls-*.js',
+          '**/dash.all.min-*.js',
+        ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
         runtimeCaching: [
           {

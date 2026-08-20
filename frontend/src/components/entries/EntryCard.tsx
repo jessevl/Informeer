@@ -13,6 +13,7 @@ import { getVideoInfo, isVideoEntry, useVideoStore } from '@/stores/video';
 import { useSettingsStore } from '@/stores/settings';
 import { useAudioStore } from '@/stores/audio';
 import { hasCommentsAvailable } from '@/api/comments';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 import type { Entry, Enclosure } from '@/types/api';
 
 // Mini progress ring SVG for media cards
@@ -52,14 +53,16 @@ export function EntryCard({
   onToggleBookmark,
   ...props
 }: EntryCardProps) {
-  const mediaType = getMediaType(entry.enclosures);
+  // Podcasts/YouTube are gated off (see @/config/features) — treat every
+  // entry as a plain article so no play buttons/icons/progress render.
+  const mediaType = PODCASTS_YOUTUBE_ENABLED ? getMediaType(entry.enclosures) : null;
   const isUnread = entry.status === 'unread';
   const isMobile = useIsMobile();
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
-  
+
   // Check for media content
-  const audioEnclosure = getAudioEnclosure(entry);
-  const videoInfo = getVideoInfo(entry);
+  const audioEnclosure = PODCASTS_YOUTUBE_ENABLED ? getAudioEnclosure(entry) : null;
+  const videoInfo = PODCASTS_YOUTUBE_ENABLED ? getVideoInfo(entry) : null;
   const isPodcast = !!audioEnclosure;
   const isVideo = !!videoInfo;
   

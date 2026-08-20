@@ -22,6 +22,7 @@ import type { Entry, Enclosure } from '@/types/api';
 import type { ViewMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
 import { einkPower } from '@/services/eink-power';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 
 const EINK_INTERACTION_SETTLE_MS = 180;
 const EINK_MASONRY_LAYOUT_SETTLE_MS = 240;
@@ -305,9 +306,11 @@ function getAudioEnclosure(entry: Entry): Enclosure | null {
 // Hook to get media progress info for an entry
 function useMediaProgress(entry: Entry) {
   const { getYouTubeProgress } = useVideoStore();
-  
-  const audioEnclosure = getAudioEnclosure(entry);
-  const videoInfo = getVideoInfo(entry);
+
+  // Podcasts/YouTube are gated off (see @/config/features) — treat every
+  // entry as a plain article so no play buttons/badges/progress render.
+  const audioEnclosure = PODCASTS_YOUTUBE_ENABLED ? getAudioEnclosure(entry) : null;
+  const videoInfo = PODCASTS_YOUTUBE_ENABLED ? getVideoInfo(entry) : null;
   const isPodcast = !!audioEnclosure;
   const isVideo = !!videoInfo;
   

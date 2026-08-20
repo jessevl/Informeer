@@ -10,6 +10,7 @@ import type { Feed, Category, FeedCounters, CreateFeedRequest, CreateFeedRespons
 import { useSettingsStore } from './settings';
 import { markApiSuccess } from './connectivity';
 import { markRefreshed } from '@/lib/focus-refresh';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 
 interface FeedsState {
   // State
@@ -83,11 +84,20 @@ export const useFeedsStore = create<FeedsState>()(
 
       // Auto-populate media category IDs from system categories
       const settings = useSettingsStore.getState();
-      const audio = categories.find(c => c.is_system && c.title === 'Audio');
-      const video = categories.find(c => c.is_system && c.title === 'Video');
+      // Podcasts/YouTube are gated off: leave audioCategoryId/videoCategoryId
+      // unset so the Audio/Video tabs stay hidden everywhere they're
+      // gated on those IDs (AppSidebar, FloatingNavBar).
+      if (PODCASTS_YOUTUBE_ENABLED) {
+        const audio = categories.find(c => c.is_system && c.title === 'Audio');
+        const video = categories.find(c => c.is_system && c.title === 'Video');
+        if (audio) settings.setAudioCategoryId(audio.id);
+        if (video) settings.setVideoCategoryId(video.id);
+      } else {
+        // Clear any IDs persisted from before the feature was gated off.
+        if (settings.audioCategoryId != null) settings.setAudioCategoryId(null);
+        if (settings.videoCategoryId != null) settings.setVideoCategoryId(null);
+      }
       const magazines = categories.find(c => c.is_system && c.title === 'Magazines');
-      if (audio) settings.setAudioCategoryId(audio.id);
-      if (video) settings.setVideoCategoryId(video.id);
       if (magazines) settings.setMagazinesCategoryId(magazines.id);
     } catch (error) {
       // If categories already populated, keep them silently

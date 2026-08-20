@@ -1,17 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useFeedsStore } from '@/stores/feeds';
 import { useEntriesStore } from '@/stores/entries';
 import { useSettingsStore } from '@/stores/settings';
 import { useAudioStore } from '@/stores/audio';
-import { useVideoStore } from '@/stores/video';
 import { api } from '@/api/client';
 import { AppLayout, type NavTab } from '@/components/layout/AppLayout';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { EntryList } from '@/components/entries/EntryList';
 import { ArticleReader } from '@/components/entries/ArticleReader';
-import { PodcastsView } from '@/components/podcasts/PodcastsView';
-import { VideosView } from '@/components/videos/VideosView';
 import { SearchModal } from '@/components/layout/SearchModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { AddFeedModal } from '@/components/feeds/AddFeedModal';
@@ -23,13 +20,21 @@ import { Plus } from 'lucide-react';
 import { useMagazinesStore } from '@/stores/magazines';
 import { useBooksStore } from '@/stores/books';
 import { useModulesStore } from '@/stores/modules';
-import { AudioPlayer } from '@/components/player/AudioPlayer';
-import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { TTSMiniPlayer } from '@/components/tts/TTSMiniPlayer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
 import { useBackGestureClose } from '@/hooks/useBackGestureClose';
+import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 import type { Entry, Feed } from '@/types/api';
+
+// Podcasts/YouTube are gated off (see @/config/features). These are dynamic
+// imports so their chunks — including PodcastsView/VideosView and their
+// transitive deps like react-player — are never fetched by the browser
+// while the flag is false, even though the code stays in the repo.
+const PodcastsView = lazy(() => import('@/components/podcasts/PodcastsView'));
+const VideosView = lazy(() => import('@/components/videos/VideosView'));
+const AudioPlayer = lazy(() => import('@/components/player/AudioPlayer'));
+const VideoPlayer = lazy(() => import('@/components/player/VideoPlayer'));
 
 const SIDEBAR_PIN_MODE_STORAGE_KEY = 'informeer-sidebar-pin-mode';
 
@@ -289,13 +294,17 @@ function HomePage() {
     setSelectedChannelTitle(feed?.title ?? null);
   }, []);
 
-  // Check if an entry is a podcast (has audio enclosure)
+  // Check if an entry is a podcast (has audio enclosure). Podcasts/YouTube
+  // are gated off (see @/config/features), so with no player to track
+  // playback completion these entries fall back to normal mark-as-read.
   const isPodcastEntry = useCallback((entry: Entry): boolean => {
+    if (!PODCASTS_YOUTUBE_ENABLED) return false;
     return entry.enclosures?.some(e => e.mime_type?.startsWith('audio/')) ?? false;
   }, []);
 
   // Check if an entry is a video (has video enclosure OR is a YouTube URL)
   const isVideoEntry = useCallback((entry: Entry): boolean => {
+    if (!PODCASTS_YOUTUBE_ENABLED) return false;
     // Check for video enclosure
     if (entry.enclosures?.some(e => e.mime_type?.startsWith('video/'))) return true;
     // Check for YouTube URL
@@ -537,29 +546,33 @@ function HomePage() {
           />
         }
         list={
-          mediaType === 'audio' ? (
-            <PodcastsView
-              feeds={feeds}
-              entries={entries}
-              onSelectEntry={handleSelectEntry}
-              onPlaySeries={(feedId, feedEntries) => {
-                useAudioStore.getState().playSeriesFromEntry(feedId, feedEntries);
-              }}
-              onPlayAllRecent={(recentEntries) => {
-                useAudioStore.getState().playAllRecent(recentEntries);
-              }}
-              onRefresh={handleRefresh}
-            />
-          ) : mediaType === 'video' ? (
-            <VideosView
-              feeds={feeds}
-              entries={entries}
-              viewMode={viewMode}
-              onSelectEntry={handleSelectEntry}
-              onRefresh={handleRefresh}
-              selectedChannelId={selectedChannelId}
-              onSelectChannel={handleSelectChannel}
-            />
+          mediaType === 'audio' && PODCASTS_YOUTUBE_ENABLED ? (
+            <Suspense fallback={null}>
+              <PodcastsView
+                feeds={feeds}
+                entries={entries}
+                onSelectEntry={handleSelectEntry}
+                onPlaySeries={(feedId, feedEntries) => {
+                  useAudioStore.getState().playSeriesFromEntry(feedId, feedEntries);
+                }}
+                onPlayAllRecent={(recentEntries) => {
+                  useAudioStore.getState().playAllRecent(recentEntries);
+                }}
+                onRefresh={handleRefresh}
+              />
+            </Suspense>
+          ) : mediaType === 'video' && PODCASTS_YOUTUBE_ENABLED ? (
+            <Suspense fallback={null}>
+              <VideosView
+                feeds={feeds}
+                entries={entries}
+                viewMode={viewMode}
+                onSelectEntry={handleSelectEntry}
+                onRefresh={handleRefresh}
+                selectedChannelId={selectedChannelId}
+                onSelectChannel={handleSelectChannel}
+              />
+            </Suspense>
           ) : mediaType === 'magazines' ? (
             <MagazinesView
               entries={entries}
@@ -660,14 +673,16 @@ function HomePage() {
         categories={categories}
       />
 
-      {/* Persistent Audio Player */}
-      <AudioPlayer />
+      {/* Persistent Audio/Video Players — gated off, see @/config/features */}
+      {PODCASTS_YOUTUBE_ENABLED && (
+        <Suspense fallback={null}>
+          <AudioPlayer />
+          <VideoPlayer />
+        </Suspense>
+      )}
 
       {/* Persistent TTS Player */}
       <TTSMiniPlayer />
-
-      {/* Persistent Video Player */}
-      <VideoPlayer />
     </>
   );
 }
