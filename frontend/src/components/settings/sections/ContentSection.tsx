@@ -57,11 +57,6 @@ const ContentSection: React.FC = () => {
   const [magMaxIssues, setMagMaxIssues] = useState(10);
   const [magPreCachePdfs, setMagPreCachePdfs] = useState(false);
   const [booksEnabled, setBooksEnabled] = useState(false);
-  const [booksZlibEnabled, setBooksZlibEnabled] = useState(true);
-  const [zlibMirror, setZlibMirror] = useState('z-lib.fm');
-  const [zlibDailyLimit, setZlibDailyLimit] = useState(5);
-  const [zlibEmail, setZlibEmail] = useState('');
-  const [zlibPassword, setZlibPassword] = useState('');
 
   // ── Retention state ────────────────────────────────────────────────────
   const [maxAgeDays, setMaxAgeDays] = useState(180);
@@ -92,10 +87,6 @@ const ContentSection: React.FC = () => {
         if (s.modules?.magazinelib?.pre_cache_pdfs != null) setMagPreCachePdfs(s.modules.magazinelib.pre_cache_pdfs === true);
         // Modules: Books
         if (s.modules?.books?.enabled != null) setBooksEnabled(s.modules.books.enabled === true);
-        if (s.modules?.books?.zlib_enabled != null) setBooksZlibEnabled(s.modules.books.zlib_enabled !== false);
-        if (s.modules?.books?.zlib_mirror) setZlibMirror(s.modules.books.zlib_mirror as string);
-        if (s.modules?.books?.zlib_daily_limit != null) setZlibDailyLimit(Number(s.modules.books.zlib_daily_limit));
-        if (s.modules?.books?.zlib_email) setZlibEmail(s.modules.books.zlib_email as string);
         // Retention
         if (s.retention?.max_age_days != null) setMaxAgeDays(Number(s.retention.max_age_days));
         if (s.retention?.max_entries_per_feed != null) setMaxEntriesPerFeed(Number(s.retention.max_entries_per_feed));
@@ -188,17 +179,12 @@ const ContentSection: React.FC = () => {
         'modules.magazinelib.pre_cache_pdfs': magPreCachePdfs,
         // Modules: Books
         'modules.books.enabled': booksEnabled,
-        'modules.books.zlib_enabled': booksZlibEnabled,
-        'modules.books.zlib_mirror': zlibMirror,
-        'modules.books.zlib_daily_limit': zlibDailyLimit,
-        'modules.books.zlib_email': zlibEmail,
         // Retention
         'retention.max_age_days': maxAgeDays,
         'retention.max_entries_per_feed': maxEntriesPerFeed,
         'retention.keep_starred': keepStarred,
       };
       if (nrcPassword) updates['modules.nrc.password'] = nrcPassword;
-      if (zlibPassword) updates['modules.books.zlib_password'] = zlibPassword;
       await api.updateSettings(updates);
       await useModulesStore.getState().fetchModules();
       setSaveSuccess(true);
@@ -394,56 +380,6 @@ const ContentSection: React.FC = () => {
           <Toggle enabled={booksEnabled} onChange={setBooksEnabled} />
         </div>
 
-        {booksEnabled && (
-          <div className="mt-3 pt-3 border-t border-[var(--color-border-subtle)] space-y-2.5">
-            <ToggleRow label="Z-Library integration" description="Search and download EPUBs" enabled={booksZlibEnabled} onChange={setBooksZlibEnabled} />
-            {booksZlibEnabled && (
-              <div className="space-y-2.5 pl-1">
-                <div>
-                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Mirror</label>
-                  <select
-                    value={zlibMirror}
-                    onChange={(e) => setZlibMirror(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg text-sm bg-[var(--color-surface-inset)] text-[var(--color-text-primary)] border border-[var(--color-border-default)]"
-                  >
-                    <option value="z-lib.fm">z-lib.fm</option>
-                    <option value="z-lib.fo">z-lib.fo</option>
-                    <option value="z-lib.gd">z-lib.gd</option>
-                    <option value="z-lib.gl">z-lib.gl</option>
-                  </select>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-[var(--color-text-secondary)]">Daily download limit</span>
-                    <p className="text-xs text-[var(--color-text-tertiary)]">~5 anon, ~10 with account</p>
-                  </div>
-                  <NumberInput value={zlibDailyLimit} min={1} max={20} onChange={setZlibDailyLimit} />
-                </div>
-                <div className="pt-2 border-t border-[var(--color-border-subtle)]">
-                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1.5">
-                    Z-Library Account <span className="text-[var(--color-text-tertiary)]">(optional)</span>
-                  </label>
-                  <div className="space-y-1.5">
-                    <input
-                      type="email"
-                      placeholder="Email"
-                      value={zlibEmail}
-                      onChange={(e) => setZlibEmail(e.target.value)}
-                      className={inputClass}
-                    />
-                    <input
-                      type="password"
-                      placeholder="Password (leave empty to keep)"
-                      value={zlibPassword}
-                      onChange={(e) => setZlibPassword(e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </Card>
 
       {/* ── Save Button ────────────────────────────────────────── */}

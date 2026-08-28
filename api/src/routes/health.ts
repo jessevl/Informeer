@@ -33,7 +33,6 @@ health.get('/health', (c) => {
   const nrcEnabled = getSetting<boolean>('modules.nrc.enabled') === true;
   const magazinelibEnabled = getSetting<boolean>('modules.magazinelib.enabled') === true;
   const booksEnabled = getSetting<boolean>('modules.books.enabled') === true;
-  const booksZlibEnabled = getSetting<boolean>('modules.books.zlib_enabled') !== false;
 
   return c.json({
     status: 'ok',
@@ -41,7 +40,7 @@ health.get('/health', (c) => {
     modules: {
       nrc: { enabled: nrcEnabled },
       magazinelib: { enabled: magazinelibEnabled },
-      books: { enabled: booksEnabled, zlib_enabled: booksZlibEnabled },
+      books: { enabled: booksEnabled },
     },
     scheduler: {
       running: true,

@@ -505,4 +505,15 @@ const migrations: Migration[] = [
       db.run("UPDATE entries SET download_failed = 0 WHERE download_failed = 1");
     },
   },
+  {
+    name: '015_remove_zlib',
+    up(db) {
+      // The Z-Library integration is gone: the site now sits behind a bot wall
+      // that server-side fetches can't clear. Migration 010 is left intact as
+      // history; this drops what it created plus the settings it fed.
+      db.run('DROP INDEX IF EXISTS idx_zlib_downloads_date');
+      db.run('DROP TABLE IF EXISTS zlib_downloads');
+      db.run("DELETE FROM settings WHERE key LIKE 'modules.books.zlib_%'");
+    },
+  },
 ];

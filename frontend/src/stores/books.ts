@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '@/api/client';
-import type { Book, BookProgress, BookHighlight, ZLibSearchResult } from '@/types/api';
+import type { Book, BookProgress, BookHighlight } from '@/types/api';
 import { markApiSuccess } from './connectivity';
 import { enqueue } from '@/lib/offline/sync-queue';
 
@@ -49,7 +49,6 @@ interface BooksState {
   addHighlight: (bookId: number, data: { cfi_range: string; text: string; note?: string; color?: string }) => Promise<BookHighlight>;
   updateHighlight: (bookId: number, highlightId: number, data: { note?: string; color?: string }) => Promise<void>;
   deleteHighlight: (bookId: number, highlightId: number) => Promise<void>;
-  downloadFromZLib: (result: ZLibSearchResult) => Promise<Book>;
   setYearlyBooksGoal: (n: number) => void;
 }
 
@@ -338,21 +337,6 @@ export const useBooksStore = create<BooksState>()(
         set(state => ({
           highlights: state.highlights.filter(h => h.id !== highlightId),
         }));
-      },
-
-      downloadFromZLib: async (result: ZLibSearchResult) => {
-        const book = await api.downloadFromZLib({
-          bookId: result.id,
-          downloadUrl: result.downloadUrl,
-          title: result.title,
-          author: result.author,
-          coverUrl: result.coverUrl,
-        });
-        set(state => ({
-          books: [book, ...state.books],
-          total: state.total + 1,
-        }));
-        return book;
       },
 
       setYearlyBooksGoal: (n: number) => {

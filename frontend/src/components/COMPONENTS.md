@@ -46,7 +46,6 @@ routes/index.tsx → PDFViewer → useReaderGestures + useReaderAnimation + useR
 | BooksView.tsx | `BooksView`, `BookHeaderActions` | routes/index.tsx |
 | BookGrid.tsx | `BookGrid` | BooksView |
 | EPUBReader.tsx | `EPUBReader` | routes/index.tsx |
-| ZLibSearch.tsx | `ZLibSearch` | BooksView |
 | BookCover.tsx | `BookCover`, `useBookCoverUrl` | BookCoverRow, BookHero |
 | BookHero.tsx | `BookHero` | BooksView |
 | BookCoverRow.tsx | `BookCoverRow` | BooksView |

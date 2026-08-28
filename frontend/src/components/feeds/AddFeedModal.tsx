@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Search, Rss, Loader2, Plus, Check, ChevronDown, Youtube, MessageCircle, Library, Headphones, BookOpen, Download, AlertCircle, Info } from 'lucide-react';
+import { X, Search, Rss, Loader2, Plus, Check, ChevronDown, Youtube, MessageCircle, Library, Headphones, AlertCircle, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/api/client';
 import type { YouTubeChannelResult, SubredditResult, PodcastResult } from '@/api/client';
@@ -16,9 +16,9 @@ import { useBooksStore } from '@/stores/books';
 import { useMagazinesStore } from '@/stores/magazines';
 import { useEntriesStore } from '@/stores/entries';
 import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
-import type { Category, ZLibSearchResult, ZLibDownloadStatus } from '@/types/api';
+import type { Category } from '@/types/api';
 
-type FeedType = 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib';
+type FeedType = 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib';
 
 // Podcasts/YouTube are gated off (see @/config/features) — never resolve to
 // those tabs even if a stale initialTab prop or persisted value asks for one.
@@ -48,194 +48,8 @@ interface MagazinePreview {
   seriesName?: string;
 }
 
-/**
- * Inline Z-Library search panel for the Books tab.
- */
-function ZLibPanel({ onClose: _onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ZLibSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadStatus, setDownloadStatus] = useState<ZLibDownloadStatus | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const downloadFromZLib = useBooksStore(s => s.downloadFromZLib);
-
-  useEffect(() => {
-    api.getZLibStatus().then(setDownloadStatus).catch(() => {});
-    setTimeout(() => inputRef.current?.focus(), 100);
-  }, []);
-
-  const handleSearch = useCallback(async (newSearch = true) => {
-    const q = query.trim();
-    if (!q) return;
-    setIsSearching(true);
-    setError(null);
-    const searchPage = newSearch ? 1 : page + 1;
-    try {
-      const response = await api.searchZLib(q, searchPage);
-      if (newSearch) {
-        setResults(response.results);
-      } else {
-        setResults(prev => [...prev, ...response.results]);
-      }
-      setPage(searchPage);
-      setHasMore(response.hasMore);
-    } catch (err: any) {
-      setError(err.message || 'Search failed');
-    } finally {
-      setIsSearching(false);
-    }
-  }, [query, page]);
-
-  const handleDownload = useCallback(async (result: ZLibSearchResult) => {
-    if (downloadingId) return;
-    if (downloadStatus && !downloadStatus.canDownload) {
-      setError(`Daily download limit reached (${downloadStatus.dailyLimit}/day). Resets at midnight.`);
-      return;
-    }
-    setDownloadingId(result.id);
-    setError(null);
-    try {
-      await downloadFromZLib(result);
-      setResults(prev => prev.filter(r => r.id !== result.id));
-      api.getZLibStatus().then(setDownloadStatus).catch(() => {});
-    } catch (err: any) {
-      setError(`Download failed: ${err.message}`);
-    } finally {
-      setDownloadingId(null);
-    }
-  }, [downloadingId, downloadFromZLib, downloadStatus]);
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Search input */}
-      <div className="flex items-center gap-2">
-        <div className="flex-1 relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(true); }}
-            placeholder="Search Z-Library for books..."
-            className={cn(
-              'w-full pl-9 pr-4 py-2.5 rounded-lg border text-sm',
-              'bg-[var(--color-surface-inset)] border-[var(--color-border-default)]',
-              'focus:outline-none focus:border-[var(--color-accent-fg)] focus:ring-1 focus:ring-[var(--color-accent-fg)]/30',
-              'text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)]',
-            )}
-          />
-        </div>
-        <button
-          onClick={() => handleSearch(true)}
-          disabled={isSearching || !query.trim()}
-          className={cn(
-            'px-4 py-2.5 rounded-lg font-medium text-sm transition-colors',
-            'bg-[var(--color-accent-fg)] text-white hover:bg-[var(--color-accent-emphasis)]',
-            'disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2',
-          )}
-        >
-          {isSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-          Search
-        </button>
-      </div>
-
-      {/* Download limit banner */}
-      {downloadStatus && (
-        <div className={cn(
-          'flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg',
-          downloadStatus.remaining <= 1
-            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-            : 'bg-[var(--color-surface-secondary)] text-[var(--color-text-tertiary)]',
-        )}>
-          <Info size={12} />
-          <span>
-            {downloadStatus.remaining > 0
-              ? `${downloadStatus.remaining} of ${downloadStatus.dailyLimit} downloads remaining today`
-              : 'Daily download limit reached — resets at midnight'}
-          </span>
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="flex items-center gap-2 px-3 py-2 text-red-500 text-sm bg-red-500/10 rounded-lg">
-          <AlertCircle size={14} />{error}
-        </div>
-      )}
-
-      {/* Results */}
-      {results.length === 0 && !isSearching && !error && (
-        <div className="flex flex-col items-center justify-center py-8 text-[var(--color-text-tertiary)]">
-          <BookOpen size={36} className="mb-2 opacity-30" />
-          <p className="text-sm">Search for books to download</p>
-        </div>
-      )}
-
-      {results.length > 0 && (
-        <div className="-mx-6 divide-y divide-[var(--color-border-subtle)]">
-          {results.map(result => {
-            const isEpub = result.extension?.toLowerCase() === 'epub';
-            const downloadable = isEpub && downloadStatus?.canDownload !== false && !!result.downloadUrl;
-            return (
-              <div key={result.id} className="flex items-start gap-3 px-6 py-3 hover:bg-[var(--color-surface-hover)] transition-colors">
-                {result.coverUrl ? (
-                  <img src={api.getZLibCoverProxyUrl(result.coverUrl)} alt="" className="w-10 h-14 object-cover rounded flex-shrink-0 bg-[var(--color-surface-tertiary)]" loading="lazy" />
-                ) : (
-                  <div className="w-10 h-14 rounded flex-shrink-0 bg-[var(--color-surface-tertiary)] flex items-center justify-center">
-                    <BookOpen size={16} className="text-[var(--color-text-disabled)]" />
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-medium text-[var(--color-text-primary)] line-clamp-1">{result.title}</h4>
-                  <p className="text-xs text-[var(--color-text-secondary)] line-clamp-1 mt-0.5">{result.author}</p>
-                  <div className="flex items-center gap-2 mt-1 text-xs text-[var(--color-text-tertiary)]">
-                    {result.year && <span>{result.year}</span>}
-                    {result.language && <span>{result.language}</span>}
-                    {result.extension && (
-                      <span className={cn(
-                        'uppercase font-medium px-1.5 py-0.5 rounded',
-                        isEpub ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-[var(--color-surface-tertiary)]',
-                      )}>{result.extension}</span>
-                    )}
-                    {result.fileSize && <span>{result.fileSize}</span>}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDownload(result)}
-                  disabled={downloadingId === result.id || !downloadable}
-                  className={cn(
-                    'flex-shrink-0 p-2 rounded-lg transition-colors',
-                    downloadable ? 'text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-fg)]/10' : 'text-[var(--color-text-disabled)] cursor-not-allowed',
-                    downloadingId === result.id && 'opacity-50',
-                  )}
-                >
-                  {downloadingId === result.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                </button>
-              </div>
-            );
-          })}
-          {hasMore && !isSearching && (
-            <button
-              onClick={() => handleSearch(false)}
-              className="w-full py-3 text-sm text-[var(--color-accent-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
-              Load more results
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialCategory }: AddFeedModalProps) {
   const magEnabled = useModulesStore((s) => s.modules.magazinelib);
-  const booksZlibEnabled = useModulesStore((s) => s.modules.booksZlib);
   const [feedType, setFeedType] = useState<FeedType>(resolveFeedType(initialTab));
   const [url, setUrl] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -491,7 +305,6 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
     if (feedType === 'reddit') return selectedSubreddit !== null;
     if (feedType === 'podcasts') return selectedPodcast !== null;
     if (feedType === 'magazinelib') return magazineQueryConfirmed && searchQuery.trim().length > 0;
-    if (feedType === 'zlib') return false; // ZLib has inline download buttons
     return false;
   };
 
@@ -588,20 +401,6 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
             >
               <Library size={16} />
               Magazines
-            </button>
-          )}
-          {booksZlibEnabled && (
-            <button
-              onClick={() => setFeedType('zlib')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
-                feedType === 'zlib'
-                  ? 'text-[var(--color-accent-fg)] border-b-2 border-[var(--color-accent-fg)]'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              )}
-            >
-              <BookOpen size={16} />
-              Books
             </button>
           )}
         </div>
@@ -1058,16 +857,11 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
             </>
           )}
           
-          {/* Z-Library Books Mode */}
-          {feedType === 'zlib' && (
-            <ZLibPanel onClose={onClose} />
-          )}
-
           {/* Category Selector — hidden for feed types with system categories */}
-          {feedType === 'youtube' || feedType === 'podcasts' || feedType === 'magazinelib' || feedType === 'zlib' ? (
+          {feedType === 'youtube' || feedType === 'podcasts' || feedType === 'magazinelib' ? (
             <div className="text-xs text-[var(--color-text-tertiary)]">
               Will be added to <span className="font-medium text-[var(--color-text-secondary)]">
-                {feedType === 'youtube' ? 'Video' : feedType === 'podcasts' ? 'Audio' : feedType === 'zlib' ? 'Books' : 'Magazines'}
+                {feedType === 'youtube' ? 'Video' : feedType === 'podcasts' ? 'Audio' : 'Magazines'}
               </span>
             </div>
           ) : (
@@ -1121,38 +915,36 @@ export function AddFeedModal({ isOpen, onClose, categories, initialTab, initialC
           )}
         </div>
         
-        {/* Footer — hidden for zlib (has inline download buttons) */}
-        {feedType !== 'zlib' && (
-          <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] shrink-0">
-            <button
-              onClick={onClose}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
-                'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
-              )}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting || !canSubmit()}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
-                'bg-[var(--color-accent-fg)] text-white',
-                'hover:bg-[var(--color-accent-emphasis)]',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-                'flex items-center gap-2'
-              )}
-            >
-              {isSubmitting ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <Plus size={16} />
-              )}
-              {feedType === 'magazinelib' ? 'Subscribe' : 'Add Feed'}
-            </button>
-          </div>
-        )}
+        {/* Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] shrink-0">
+          <button
+            onClick={onClose}
+            className={cn(
+              'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
+              'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+            )}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !canSubmit()}
+            className={cn(
+              'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
+              'bg-[var(--color-accent-fg)] text-white',
+              'hover:bg-[var(--color-accent-emphasis)]',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'flex items-center gap-2'
+            )}
+          >
+            {isSubmitting ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Plus size={16} />
+            )}
+            {feedType === 'magazinelib' ? 'Subscribe' : 'Add Feed'}
+          </button>
+        </div>
       </div>
     </div>
   );

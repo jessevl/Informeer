@@ -68,7 +68,7 @@ interface AppSidebarProps {
   onRefresh: () => void;
   onOpenSettings?: () => void;
   onOpenSearch?: () => void;
-  onAddFeed?: (categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib') => void;
+  onAddFeed?: (categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib') => void;
   onManageFeeds?: () => void;
   onEditFeed?: (feed: Feed) => void;
   onToggleCollapse?: () => void;
@@ -616,7 +616,7 @@ function SidebarRail({
   }) => void;
   onOpenSettings?: () => void;
   onOpenSearch?: () => void;
-  onAddFeed?: (categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib') => void;
+  onAddFeed?: (categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib') => void;
   onManageFeeds?: () => void;
   onEditFeed?: (feed: Feed) => void;
   onToggleCollapse?: () => void;

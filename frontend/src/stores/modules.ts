@@ -12,7 +12,6 @@ interface ModuleStatus {
   nrc: boolean;
   magazinelib: boolean;
   books: boolean;
-  booksZlib: boolean;
 }
 
 interface ModulesState {
@@ -22,7 +21,7 @@ interface ModulesState {
 }
 
 export const useModulesStore = create<ModulesState>((set) => ({
-  modules: { nrc: false, magazinelib: false, books: false, booksZlib: false },
+  modules: { nrc: false, magazinelib: false, books: false },
   loaded: false,
 
   fetchModules: async () => {
@@ -33,7 +32,6 @@ export const useModulesStore = create<ModulesState>((set) => ({
           nrc: health.modules.nrc.enabled,
           magazinelib: health.modules.magazinelib.enabled,
           books: health.modules.books.enabled,
-          booksZlib: health.modules.books.zlib_enabled ?? false,
         },
         loaded: true,
       });

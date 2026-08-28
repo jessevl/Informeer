@@ -1,16 +1,15 @@
 /**
  * Books Routes
  *
- * CRUD for EPUB books, reading progress, highlights, and LibGen search/download.
+ * CRUD for EPUB books, reading progress, and highlights.
  * All routes under `/v1/books/*` — require auth + books module enabled.
  */
 
 import { Hono } from 'hono';
 import type { AuthUser } from '../middleware/auth.ts';
 import { getDb } from '../db/connection.ts';
-import { isModuleEnabled, getSetting } from '../services/settings.ts';
+import { isModuleEnabled } from '../services/settings.ts';
 import { parseEpub, saveCoverImage } from '../services/epub-parser.ts';
-import { searchZLib, downloadFromZLib, getDownloadStatus, getZLibMirrors } from '../services/zlib.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { log } from '../lib/logger.ts';
 import { config } from '../config.ts';
@@ -206,7 +205,6 @@ books.post('/v1/books', async (c) => {
 
     return await processAndStoreEpub(db, user, fileData, file.name, c);
   } else {
-    // JSON body (for LibGen downloads — book data already available)
     throw badRequest('Expected multipart/form-data with an EPUB file');
   }
 });
@@ -326,7 +324,13 @@ books.get('/v1/books/:id/cover', (c) => {
     throw notFound('Cover not found');
   }
 
-  const mime = row.cover_path.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  // Covers are normally re-encoded to JPEG on save, but the fallback path
+  // keeps the original format when re-encoding fails.
+  const ext = row.cover_path.slice(row.cover_path.lastIndexOf('.') + 1).toLowerCase();
+  const mime = ext === 'png' ? 'image/png'
+    : ext === 'gif' ? 'image/gif'
+    : ext === 'webp' ? 'image/webp'
+    : 'image/jpeg';
 
   return new Response(Bun.file(row.cover_path), {
     headers: {
@@ -537,88 +541,6 @@ books.delete('/v1/books/:id/highlights/:hid', (c) => {
   return c.json({ ok: true });
 });
 
-// Z-Library cover proxy moved to public endpoint — see index.ts /cover-proxy
-
-// ===========================================================================
-// Z-Library Search & Download
-// ===========================================================================
-
-// GET /v1/books/zlib/search?q=...&page=1
-books.get('/v1/books/zlib/search', async (c) => {
-  requireModule();
-
-  const zlibEnabled = getSetting<boolean>('modules.books.zlib_enabled') !== false;
-  if (!zlibEnabled) {
-    throw forbidden('Z-Library search is not enabled');
-  }
-
-  const query = c.req.query('q');
-  const page = parseInt(c.req.query('page') || '1', 10);
-
-  if (!query) {
-    throw badRequest('Missing query parameter: q');
-  }
-
-  const results = await searchZLib(query, page);
-  return c.json(results);
-});
-
-// GET /v1/books/zlib/status — Download limit status
-books.get('/v1/books/zlib/status', (c) => {
-  requireModule();
-  const status = getDownloadStatus();
-  return c.json(status);
-});
-
-// GET /v1/books/zlib/mirrors — Available mirror list
-books.get('/v1/books/zlib/mirrors', (c) => {
-  requireModule();
-  return c.json({ mirrors: getZLibMirrors() });
-});
-
-// POST /v1/books/zlib/download — Download a book from Z-Library and add to library
-books.post('/v1/books/zlib/download', async (c) => {
-  requireModule();
-  const user = c.get('user');
-  const db = getDb();
-
-  const zlibEnabled = getSetting<boolean>('modules.books.zlib_enabled') !== false;
-  if (!zlibEnabled) {
-    throw forbidden('Z-Library search is not enabled');
-  }
-
-  const body = await c.req.json<{
-    bookId: string;
-    downloadUrl: string;
-    title?: string;
-    author?: string;
-    coverUrl?: string;
-  }>();
-
-  if (!body.bookId || !body.downloadUrl) {
-    throw badRequest('bookId and downloadUrl are required');
-  }
-
-  log.info(`[books] Z-Library download requested`, { bookId: body.bookId, title: body.title });
-
-  // Download from Z-Library
-  const { data, filename } = await downloadFromZLib(
-    body.bookId,
-    body.downloadUrl,
-    body.title || 'Unknown',
-  );
-
-  try {
-    return await processAndStoreEpub(db, user, data, filename, c, {
-      title: body.title,
-      author: body.author,
-      coverUrl: body.coverUrl,
-    });
-  } catch (err) {
-    throw err;
-  }
-});
-
 // ===========================================================================
 // Shared: process & store EPUB
 // ===========================================================================
@@ -629,7 +551,6 @@ async function processAndStoreEpub(
   fileData: Buffer,
   filename: string,
   c: any,
-  overrides?: { title?: string; author?: string; coverUrl?: string },
 ) {
   // Save EPUB to temp location first for parsing
   const tempDir = join(config.dataDir, 'books', 'tmp');
@@ -648,10 +569,10 @@ async function processAndStoreEpub(
     coverMimeType = parsed.coverMimeType;
   } catch (err: any) {
     log.warn(`[books] Failed to parse EPUB metadata: ${err.message}`);
-    // Use filename as title fallback
+    // Fall back to the filename so a malformed EPUB still lands in the library
     metadata = {
-      title: overrides?.title || filename.replace(/\.epub$/i, ''),
-      author: overrides?.author || '',
+      title: filename.replace(/\.epub$/i, ''),
+      author: '',
       publisher: '',
       language: '',
       description: '',
@@ -659,38 +580,6 @@ async function processAndStoreEpub(
       tags: [],
       extra: {},
     };
-  }
-
-  // Apply overrides (from Z-Library metadata which may be better)
-  if (overrides?.title) metadata.title = overrides.title;
-  if (overrides?.author) metadata.author = overrides.author;
-
-  // If no cover was extracted from the EPUB, try downloading from the provided URL (e.g. Z-Library)
-  // Also prefer Z-Library covers when available — EPUB-embedded covers are often tiny thumbnails
-  if (overrides?.coverUrl) {
-    try {
-      log.debug(`[books] Downloading cover from: ${overrides.coverUrl}`);
-      const coverResponse = await fetch(overrides.coverUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (coverResponse.ok) {
-        const ab = await coverResponse.arrayBuffer();
-        const externalCover = Buffer.from(ab);
-        const ct = coverResponse.headers.get('content-type') || '';
-        const externalMime = ct.includes('png') ? 'image/png'
-          : ct.includes('webp') ? 'image/webp'
-          : 'image/jpeg';
-        // Use external cover if it's larger than the embedded one (or if there's no embedded one)
-        if (!coverData || externalCover.length > coverData.length) {
-          coverData = externalCover;
-          coverMimeType = externalMime;
-          log.debug(`[books] Using external cover (${externalCover.length} bytes) over embedded (${coverData ? coverData.length : 0} bytes)`);
-        }
-      }
-    } catch (err: any) {
-      log.debug(`[books] Failed to download cover: ${err.message}`);
-    }
   }
 
   // Insert book record

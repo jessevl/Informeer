@@ -75,7 +75,7 @@ function HomePage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addFeedOpen, setAddFeedOpen] = useState(false);
-  const [addFeedInitialTab, setAddFeedInitialTab] = useState<'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib'>('rss');
+  const [addFeedInitialTab, setAddFeedInitialTab] = useState<'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib'>('rss');
   const [addFeedInitialCategory, setAddFeedInitialCategory] = useState<number | undefined>(undefined);
   const [editFeedOpen, setEditFeedOpen] = useState(false);
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
@@ -250,7 +250,7 @@ function HomePage() {
   // Go back to previous view
   const handleGoBack = useCallback(() => {
     if (selectedEntry) {
-      handleSelectEntry(null);
+      selectEntry(null);
     } else if (selectedChannelId !== null) {
       // If viewing a specific video channel, go back to the video main view
       setSelectedChannelId(null);
@@ -274,7 +274,7 @@ function HomePage() {
         mediaType: lastView.mediaType,
       });
     }
-  }, [selectedChannelId, navigationHistory, setFilter]);
+  }, [selectedEntry, selectEntry, selectedChannelId, navigationHistory, setFilter]);
 
   // Let Android/iOS PWA back gestures close the currently open screen
   // (reader, drill-down view, or modal) instead of exiting the whole app.
@@ -525,7 +525,7 @@ function HomePage() {
             onRefresh={handleRefresh}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenSearch={() => setSearchOpen(true)}
-            onAddFeed={(categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib' | 'zlib') => { setAddFeedInitialTab(tab || 'rss'); setAddFeedInitialCategory(categoryId); setAddFeedOpen(true); }}
+            onAddFeed={(categoryId?: number, tab?: 'rss' | 'youtube' | 'reddit' | 'podcasts' | 'magazinelib') => { setAddFeedInitialTab(tab || 'rss'); setAddFeedInitialCategory(categoryId); setAddFeedOpen(true); }}
             onManageFeeds={() => setFeedManagementOpen(true)}
             onEditFeed={handleEditFeed}
             onToggleCollapse={() => {

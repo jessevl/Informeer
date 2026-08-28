@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import sharp from 'sharp';
 import { log } from '../lib/logger.ts';
 
@@ -43,54 +43,141 @@ export interface ParsedEpub {
 // XML helpers (lightweight, no external dependency)
 // ---------------------------------------------------------------------------
 
+/** Escape a string for safe interpolation into a RegExp. */
+function reEscape(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Optional namespace prefix — the `dc:` in `<dc:title>`. */
+const NS = '(?:[A-Za-z0-9_.-]+:)?';
+
+/**
+ * Pattern source for an opening tag named exactly `tag`.
+ *
+ * The `(?=[\s/>])` lookahead is load-bearing: without it `<rootfile` also
+ * matches the `<rootfiles>` wrapper, which carries none of the attributes
+ * and — being first in the document — shadows the element we actually want.
+ */
+function openTagSrc(tag: string): string {
+  return `<${NS}${reEscape(tag)}(?=[\\s/>])[^>]*>`;
+}
+
+/** Decode the predefined XML entities plus numeric character references. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/** Parse one tag's attributes into a map keyed by lowercased name. */
+function parseAttrs(tagXml: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const re = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+  let m;
+  while ((m = re.exec(tagXml)) !== null) {
+    attrs[m[1].toLowerCase()] = decodeEntities(m[2] ?? m[3] ?? '');
+  }
+  return attrs;
+}
+
+/** Every opening tag named `tag`, as attribute maps. */
+function xmlTags(xml: string, tag: string): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  const re = new RegExp(openTagSrc(tag), 'gi');
+  let m;
+  while ((m = re.exec(xml)) !== null) out.push(parseAttrs(m[0]));
+  return out;
+}
+
 /** Extract text content from an XML tag. Returns first match or empty string. */
 function xmlText(xml: string, tag: string): string {
-  // Handle both <tag>text</tag> and <ns:tag>text</ns:tag>
-  const patterns = [
-    new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`, 'i'),
-    new RegExp(`<[a-z]+:${tag}[^>]*>([^<]*)</[a-z]+:${tag}>`, 'i'),
-  ];
-  for (const re of patterns) {
-    const m = xml.match(re);
-    if (m?.[1]) return m[1].trim();
-  }
-  return '';
+  const re = new RegExp(`${openTagSrc(tag)}([\\s\\S]*?)</${NS}${reEscape(tag)}\\s*>`, 'i');
+  const m = xml.match(re);
+  return m?.[1] ? decodeEntities(m[1].replace(/<[^>]*>/g, '')).trim() : '';
 }
 
 /** Extract all matches of a tag's text content */
 function xmlTextAll(xml: string, tag: string): string[] {
+  const re = new RegExp(`${openTagSrc(tag)}([\\s\\S]*?)</${NS}${reEscape(tag)}\\s*>`, 'gi');
   const results: string[] = [];
-  const patterns = [
-    new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`, 'gi'),
-    new RegExp(`<[a-z]+:${tag}[^>]*>([^<]*)</[a-z]+:${tag}>`, 'gi'),
-  ];
-  for (const re of patterns) {
-    let m;
-    while ((m = re.exec(xml)) !== null) {
-      if (m[1]?.trim()) results.push(m[1].trim());
-    }
-  }
-  return results;
-}
-
-/** Extract an attribute value from an XML tag */
-function xmlAttr(xml: string, tag: string, attr: string): string {
-  const tagMatch = xml.match(new RegExp(`<${tag}[^>]*>`, 'i'));
-  if (!tagMatch) return '';
-  const attrMatch = tagMatch[0].match(new RegExp(`${attr}\\s*=\\s*"([^"]*)"`, 'i'));
-  return attrMatch?.[1] || '';
-}
-
-/** Find all tags matching a pattern and return their outer XML */
-function xmlFindAll(xml: string, tag: string): string[] {
-  const results: string[] = [];
-  // Self-closing and regular tags
-  const re = new RegExp(`<${tag}[^>]*/?>(?:[\\s\\S]*?</${tag}>)?`, 'gi');
   let m;
   while ((m = re.exec(xml)) !== null) {
-    results.push(m[0]);
+    const text = decodeEntities(m[1].replace(/<[^>]*>/g, '')).trim();
+    if (text) results.push(text);
   }
   return results;
+}
+
+/**
+ * Value of `attr` on the first `<tag>` that actually carries it.
+ *
+ * Scanning every match rather than only the first means a wrapper element
+ * without the attribute can't shadow the real one.
+ */
+function xmlAttr(xml: string, tag: string, attr: string): string {
+  for (const attrs of xmlTags(xml, tag)) {
+    const v = attrs[attr.toLowerCase()];
+    if (v) return v;
+  }
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// ZIP path resolution
+// ---------------------------------------------------------------------------
+
+function safeDecode(s: string): string {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
+/** Collapse `.` and `..` segments so the result matches a ZIP entry name. */
+function normalizePath(p: string): string {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  return out.join('/');
+}
+
+/**
+ * Resolve a manifest href to its ZIP entry.
+ *
+ * Hrefs are URL-encoded and relative to the OPF while ZIP entry names are raw
+ * and archive-absolute, so plain concatenation misses on any path containing a
+ * space, an escaped character, or a `..` segment.
+ */
+function zipLookup(
+  entries: Map<string, Uint8Array>,
+  opfDir: string,
+  href: string,
+): Uint8Array | null {
+  const bare = href.split('#')[0].split('?')[0];
+  const variants = new Set<string>();
+  for (const h of [bare, safeDecode(bare)]) {
+    variants.add(normalizePath(opfDir + h));
+    variants.add(normalizePath(h));
+  }
+  for (const v of variants) {
+    const hit = entries.get(v);
+    if (hit?.length) return hit;
+  }
+
+  // Last resort: match on basename, case-insensitively.
+  const base = (safeDecode(bare).split('/').pop() || '').toLowerCase();
+  if (base) {
+    for (const [path, data] of entries) {
+      const lower = path.toLowerCase();
+      if ((lower === base || lower.endsWith('/' + base)) && data.length) return data;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,9 +192,6 @@ function xmlFindAll(xml: string, tag: string): string[] {
  */
 export async function parseEpub(epubPath: string): Promise<ParsedEpub> {
   const zipData = readFileSync(epubPath);
-  
-  // Use Bun's native ZIP reading
-  const blob = new Blob([zipData]);
   const entries = await readZipEntries(zipData);
 
   // 1. Find the rootfile from META-INF/container.xml
@@ -193,11 +277,9 @@ function extractToc(
   if (ncxId) {
     const ncxHref = findManifestHref(opfXml, ncxId);
     if (ncxHref) {
-      const ncxPath = opfDir + ncxHref;
-      const ncxData = zipEntries.get(ncxPath);
+      const ncxData = zipLookup(zipEntries, opfDir, ncxHref);
       if (ncxData) {
-        const ncxStr = new TextDecoder().decode(ncxData);
-        return parseNcxNavPoints(ncxStr);
+        return parseNcxNavPoints(new TextDecoder().decode(ncxData));
       }
     }
   }
@@ -205,42 +287,37 @@ function extractToc(
   // Try nav document (EPUB 3)
   const navHref = findNavHref(opfXml);
   if (navHref) {
-    const navPath = opfDir + navHref;
-    const navData = zipEntries.get(navPath);
+    const navData = zipLookup(zipEntries, opfDir, navHref);
     if (navData) {
-      const navStr = new TextDecoder().decode(navData);
-      return parseNavToc(navStr);
+      return parseNavToc(new TextDecoder().decode(navData));
     }
   }
 
   return [];
 }
 
+/** True if a manifest item declares the given space-separated property. */
+function hasProperty(item: Record<string, string>, prop: string): boolean {
+  return (item.properties || '').split(/\s+/).includes(prop);
+}
+
 function findNcxId(opfXml: string): string | null {
-  // Look for <spine toc="ncx"> or manifest item with media-type="application/x-dtbncx+xml"
-  const spineMatch = opfXml.match(/<spine[^>]+toc="([^"]+)"/i);
-  if (spineMatch) return spineMatch[1];
-  
-  const ncxMatch = opfXml.match(/<item[^>]+media-type="application\/x-dtbncx\+xml"[^>]+id="([^"]+)"/i)
-    || opfXml.match(/<item[^>]+id="([^"]+)"[^>]+media-type="application\/x-dtbncx\+xml"/i);
-  return ncxMatch?.[1] || null;
+  // <spine toc="ncx">, else the manifest item declaring the NCX media type
+  const spineToc = xmlTags(opfXml, 'spine')[0]?.toc;
+  if (spineToc) return spineToc;
+
+  const ncx = xmlTags(opfXml, 'item')
+    .find(i => i['media-type'] === 'application/x-dtbncx+xml');
+  return ncx?.id || null;
 }
 
 function findManifestHref(opfXml: string, id: string): string | null {
-  const re = new RegExp(`<item[^>]+id="${id}"[^>]+href="([^"]+)"`, 'i');
-  const m = opfXml.match(re);
-  if (m) return m[1];
-  
-  const re2 = new RegExp(`<item[^>]+href="([^"]+)"[^>]+id="${id}"`, 'i');
-  const m2 = opfXml.match(re2);
-  return m2?.[1] || null;
+  return xmlTags(opfXml, 'item').find(i => i.id === id)?.href || null;
 }
 
 function findNavHref(opfXml: string): string | null {
-  // EPUB 3 nav document has properties="nav"
-  const navMatch = opfXml.match(/<item[^>]+properties="[^"]*nav[^"]*"[^>]+href="([^"]+)"/i)
-    || opfXml.match(/<item[^>]+href="([^"]+)"[^>]+properties="[^"]*nav[^"]*"/i);
-  return navMatch?.[1] || null;
+  // EPUB 3 nav document declares properties="nav"
+  return xmlTags(opfXml, 'item').find(i => hasProperty(i, 'nav'))?.href || null;
 }
 
 function parseNcxNavPoints(ncxXml: string): EpubTocEntry[] {
@@ -279,48 +356,61 @@ function extractCover(
   zipEntries: Map<string, Uint8Array>,
   opfDir: string,
 ): { coverData: Buffer | null; coverMimeType: string } {
-  // Strategy 1: <meta name="cover" content="cover-image-id"/>
-  const coverMetaMatch = opfXml.match(/<meta[^>]+name="cover"[^>]+content="([^"]+)"/i)
-    || opfXml.match(/<meta[^>]+content="([^"]+)"[^>]+name="cover"/i);
-  
-  if (coverMetaMatch) {
-    const coverId = coverMetaMatch[1];
-    const href = findManifestHref(opfXml, coverId);
-    if (href) {
-      const coverPath = opfDir + href;
-      const data = zipEntries.get(coverPath);
-      if (data) {
-        const mime = guessMimeType(href);
-        return { coverData: Buffer.from(data), coverMimeType: mime };
-      }
-    }
+  const items = xmlTags(opfXml, 'item');
+  const isImage = (i: Record<string, string>) =>
+    (i['media-type'] || '').startsWith('image/')
+    || IMAGE_EXT_RE.test(i.href || '');
+
+  // Ordered best-guess hrefs. Each is tried against the archive in turn, so a
+  // manifest entry pointing at a file that isn't actually there falls through
+  // to the next candidate rather than aborting the search.
+  const candidates: string[] = [];
+
+  // Strategy 1: <meta name="cover" content="<manifest-id>"/> (EPUB 2)
+  const coverId = xmlTags(opfXml, 'meta')
+    .find(m => (m.name || '').toLowerCase() === 'cover')?.content;
+  if (coverId) {
+    const href = items.find(i => i.id === coverId)?.href;
+    if (href) candidates.push(href);
   }
 
   // Strategy 2: manifest item with properties="cover-image" (EPUB 3)
-  const coverItemMatch = opfXml.match(/<item[^>]+properties="[^"]*cover-image[^"]*"[^>]+href="([^"]+)"/i)
-    || opfXml.match(/<item[^>]+href="([^"]+)"[^>]+properties="[^"]*cover-image[^"]*"/i);
-  
-  if (coverItemMatch) {
-    const coverPath = opfDir + coverItemMatch[1];
-    const data = zipEntries.get(coverPath);
-    if (data) {
-      const mime = guessMimeType(coverItemMatch[1]);
-      return { coverData: Buffer.from(data), coverMimeType: mime };
+  const propCover = items.find(i => hasProperty(i, 'cover-image'))?.href;
+  if (propCover) candidates.push(propCover);
+
+  // Strategy 3: a manifest image whose id or href merely looks like a cover
+  for (const i of items) {
+    if (isImage(i) && (/cover/i.test(i.id || '') || /cover/i.test(i.href || ''))) {
+      candidates.push(i.href);
     }
   }
 
-  // Strategy 3: look for common cover file names
+  for (const href of candidates) {
+    if (!href) continue;
+    const data = zipLookup(zipEntries, opfDir, href);
+    if (data?.length) {
+      return { coverData: Buffer.from(data), coverMimeType: guessMimeType(href) };
+    }
+  }
+
+  // Strategy 4: any cover-ish image anywhere in the archive, ignoring the manifest
   for (const [path, data] of zipEntries) {
-    const lower = path.toLowerCase();
-    if (
-      (lower.includes('cover') && (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png')))
-    ) {
+    if (/cover/i.test(path) && IMAGE_EXT_RE.test(path) && data.length) {
       return { coverData: Buffer.from(data), coverMimeType: guessMimeType(path) };
     }
   }
 
   return { coverData: null, coverMimeType: '' };
 }
+
+/**
+ * Raster image extensions.
+ *
+ * SVG is deliberately excluded: an EPUB `cover.svg` is nearly always a wrapper
+ * that references the real bitmap, so picking it up and rasterising it yields
+ * a blank image rather than the cover.
+ */
+const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp)$/i;
 
 function guessMimeType(path: string): string {
   const lower = path.toLowerCase();
@@ -417,13 +507,10 @@ export async function saveCoverImage(
   outputDir: string,
   bookId: number,
 ): Promise<string> {
-  const ext = coverMimeType.includes('png') ? 'png' 
-    : coverMimeType.includes('gif') ? 'gif' 
-    : 'jpg';
-  const coverPath = join(outputDir, `${bookId}.${ext}`);
-  mkdirSync(dirname(coverPath), { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
 
-  // Resize cover to 512px width for consistent quality
+  // Normalise to JPEG at up to 1024px wide, so the cover route only ever has
+  // one format to serve and oversized art doesn't bloat the library view.
   try {
     const resized = await sharp(coverData)
       .resize({ width: 1024, withoutEnlargement: true })
@@ -433,7 +520,12 @@ export async function saveCoverImage(
     writeFileSync(jpgPath, resized);
     return jpgPath;
   } catch (err: any) {
-    log.debug(`[epub-parser] Sharp resize failed, saving original: ${err.message}`);
+    log.debug(`[epub-parser] Sharp re-encode failed, saving original: ${err.message}`);
+    const ext = coverMimeType.includes('png') ? 'png'
+      : coverMimeType.includes('gif') ? 'gif'
+      : coverMimeType.includes('webp') ? 'webp'
+      : 'jpg';
+    const coverPath = join(outputDir, `${bookId}.${ext}`);
     writeFileSync(coverPath, coverData);
     return coverPath;
   }

@@ -45,11 +45,6 @@ export async function seed(): Promise<void> {
     ['modules.magazinelib.enabled', 'false', 'system'],
     ['modules.magazinelib.category_id', 'null', 'system'],
     ['modules.books.enabled', 'false', 'system'],
-    ['modules.books.zlib_enabled', 'true', 'system'],
-    ['modules.books.zlib_mirror', '"z-lib.fm"', 'system'],
-    ['modules.books.zlib_daily_limit', '5', 'system'],
-    ['modules.books.zlib_email', '""', 'system'],
-    ['modules.books.zlib_password', '""', 'system'],
 
     // Scheduler
     ['scheduler.interval_minutes', '60', 'system'],

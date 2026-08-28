@@ -28,6 +28,7 @@ import podcastArtwork from './routes/podcast-artwork.ts';
 
 import { getScheduler } from './services/scheduler.ts';
 import { startCacheCleanupScheduler } from './services/cache-manager.ts';
+import { backfillBookCovers } from './services/book-covers.ts';
 import { log } from './lib/logger.ts';
 
 // --- Global crash guards ---
@@ -52,6 +53,12 @@ mkdirSync(join(config.dataDir, 'books'), { recursive: true });
 migrate();
 await seed();
 
+// One-time: re-extract embedded EPUB covers now that the parser works.
+// Detached so a large library doesn't hold up the server accepting requests.
+backfillBookCovers().catch((err) => {
+  log.error('Book cover backfill failed', { error: String(err) });
+});
+
 // --- App ---
 
 const app = new Hono();
@@ -68,47 +75,6 @@ app.use('*', cors({
 app.route('', health);
 app.route('', magazinelibCover);
 app.route('', nrcCover);
-
-// Public cover proxy — used by <img> tags which can't send auth headers.
-// Restricted to known image CDN domains to prevent abuse as an open proxy.
-const ALLOWED_COVER_DOMAINS = ['covers.z-lib.fm', 'covers.z-lib.fo', 'covers.z-lib.gd', 'covers.z-lib.gl'];
-app.get('/cover-proxy', async (c) => {
-  const url = c.req.query('url');
-  if (!url) return c.json({ error: 'Missing url parameter' }, 400);
-
-  // Validate URL against allow-list
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return c.json({ error: 'Invalid URL' }, 400);
-  }
-  if (!ALLOWED_COVER_DOMAINS.includes(parsed.hostname)) {
-    return c.json({ error: 'Domain not allowed' }, 403);
-  }
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Referer': parsed.origin + '/',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!response.ok) return c.json({ error: 'Cover not found' }, 404);
-
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const body = await response.arrayBuffer();
-
-    c.header('Content-Type', contentType);
-    c.header('Cache-Control', 'public, max-age=86400, immutable');
-    return c.body(body);
-  } catch {
-    return c.json({ error: 'Failed to fetch cover' }, 502);
-  }
-});
 
 // Static file serving for cached content
 app.use('/files/*', serveStatic({

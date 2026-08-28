@@ -6,10 +6,10 @@ import { encrypt, decrypt } from '../lib/crypto.ts';
 let cache: Map<string, string> | null = null;
 
 /** Secret keys that should be encrypted at rest */
-const SECRET_KEYS = new Set(['modules.nrc.password', 'modules.books.zlib_password']);
+const SECRET_KEYS = new Set(['modules.nrc.password']);
 
 /** Keys that should be masked in GET responses */
-const MASKED_KEYS = new Set(['modules.nrc.password', 'modules.books.zlib_password']);
+const MASKED_KEYS = new Set(['modules.nrc.password']);
 
 function loadCache(): Map<string, string> {
   if (cache) return cache;

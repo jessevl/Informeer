@@ -4,8 +4,8 @@
  *   - "Reading": Currently Reading hero, stats strip, Recently Added shelf
  *   - "Library": searchable & paginated grid of every book the user owns
  * A floating glass tab bar at the bottom of the viewport switches between
- * the two. Uploads (header buttons + drag&drop), Z-Library search, and
- * the EPUB reader overlay are unchanged.
+ * the two. Uploads (header buttons + drag&drop) and the EPUB reader
+ * overlay are unchanged.
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -13,7 +13,6 @@ import { cn } from '@/lib/utils';
 import {
   Library,
   Upload,
-  Search,
   Loader2,
   CloudOff,
   SearchX,
@@ -21,11 +20,9 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { useBooksStore } from '@/stores/books';
-import { useModulesStore } from '@/stores/modules';
 import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 import { BookGrid } from './BookGrid';
 import { EPUBReader } from './EPUBReader';
-import { ZLibSearch } from './ZLibSearch';
 import { BookHero } from './BookHero';
 import { ReadingStatsStrip } from './ReadingStatsStrip';
 import { BookCoverRow } from './BookCoverRow';
@@ -58,9 +55,7 @@ const BOOKS_TAB_BAR_HEIGHT_PX = 52;
  */
 export function BookHeaderActions() {
   const uploadBook = useBooksStore(s => s.uploadBook);
-  const zlibEnabled = useModulesStore(s => s.modules.booksZlib);
   const [isUploading, setIsUploading] = useState(false);
-  const [zlibSearchOpen, setZlibSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = useCallback(async (files: FileList | null) => {
@@ -93,15 +88,6 @@ export function BookHeaderActions() {
         >
           {isUploading ? <Loader2 className="w-[18px] h-[18px]" strokeWidth={1.75} /> : <Upload className="w-[18px] h-[18px]" strokeWidth={1.75} />}
         </button>
-        {zlibEnabled && (
-          <button
-            onClick={() => setZlibSearchOpen(true)}
-            className="flex items-center justify-center w-8 h-8 rounded-full text-[var(--color-text-secondary)] hover:bg-white/10 dark:hover:bg-white/10 transition-all"
-            title="Search Z-Library"
-          >
-            <Search className="w-[18px] h-[18px]" strokeWidth={1.75} />
-          </button>
-        )}
       </div>
       <input
         ref={fileInputRef}
@@ -111,7 +97,6 @@ export function BookHeaderActions() {
         className="hidden"
         onChange={(e) => handleUpload(e.target.files)}
       />
-      <ZLibSearch isOpen={zlibSearchOpen} onClose={() => setZlibSearchOpen(false)} />
     </>
   );
 }
@@ -385,7 +370,7 @@ export function BooksView() {
               <p className="text-sm text-center max-w-md mb-6">
                 {effectiveOffline
                   ? 'Save books for offline use while online and they will remain available here on cold offline starts.'
-                  : 'Upload EPUB files or search Z-Library to build your library. Books are stored on the server for reading across devices.'}
+                  : 'Upload EPUB files to build your library. Books are stored on the server for reading across devices.'}
               </p>
               {!effectiveOffline && (
                 <div className="flex flex-col items-center gap-2 text-xs">

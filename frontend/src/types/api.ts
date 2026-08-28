@@ -201,32 +201,3 @@ export interface BookHighlight {
   created_at: string;
 }
 
-export interface ZLibSearchResult {
-  id: string;
-  title: string;
-  author: string;
-  publisher: string;
-  year: string;
-  language: string;
-  extension: string;
-  fileSize: string;
-  rating: string;
-  coverUrl: string;
-  bookUrl: string;
-  downloadUrl: string;
-  isbn: string;
-}
-
-export interface ZLibSearchResponse {
-  results: ZLibSearchResult[];
-  page: number;
-  totalPages: number;
-  hasMore: boolean;
-}
-
-export interface ZLibDownloadStatus {
-  downloadsToday: number;
-  dailyLimit: number;
-  remaining: number;
-  canDownload: boolean;
-}

@@ -10,7 +10,6 @@ import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { getDb } from '../db/connection.ts';
 import { getSystemCategoryId } from './categories.ts';
 import { log } from '../lib/logger.ts';
-import { clearZLibSession } from '../services/zlib.ts';
 import { invalidateNrcSession } from '../sources/nrc.ts';
 
 
@@ -91,12 +90,6 @@ function handleModuleSideEffects(
       );
       log.info('[settings] Disabled MagazineLib feeds', { user_id: userId });
     }
-  }
-
-  // --- Z-Library credentials ---
-  if ('modules.books.zlib_email' in updates || 'modules.books.zlib_password' in updates) {
-    clearZLibSession();
-    log.info('[settings] Z-Library credentials updated, session cleared');
   }
 
   // --- NRC credentials ---

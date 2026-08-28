@@ -540,30 +540,6 @@ class ApiClient {
     await this.request(`/books/${bookId}/highlights/${highlightId}`, { method: 'DELETE' });
   }
 
-  // ==================== Z-Library ====================
-
-  async searchZLib(query: string, page = 1): Promise<import('@/types/api').ZLibSearchResponse> {
-    return this.request(`/books/zlib/search?q=${encodeURIComponent(query)}&page=${page}`);
-  }
-
-  async downloadFromZLib(data: { bookId: string; downloadUrl: string; title?: string; author?: string; coverUrl?: string }): Promise<import('@/types/api').Book> {
-    return this.request('/books/zlib/download', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getZLibStatus(): Promise<import('@/types/api').ZLibDownloadStatus> {
-    return this.request('/books/zlib/status');
-  }
-
-  async getZLibMirrors(): Promise<{ mirrors: string[] }> {
-    return this.request('/books/zlib/mirrors');
-  }
-
-  getZLibCoverProxyUrl(coverUrl: string): string {
-    return buildBackendUrl(`/cover-proxy?url=${encodeURIComponent(coverUrl)}`);
-  }
 }
 
 export interface HealthResponse {
@@ -572,7 +548,7 @@ export interface HealthResponse {
   modules: {
     nrc: { enabled: boolean };
     magazinelib: { enabled: boolean };
-    books: { enabled: boolean; zlib_enabled: boolean };
+    books: { enabled: boolean };
   };
   scheduler: { running: boolean; feeds: number; erroring: number };
   database: { entries: number; size_mb: number };

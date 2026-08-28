@@ -41,19 +41,9 @@ export function getTestDb(): Database {
 
 export function teardownTestDb(): void {
   if (testDb) {
+    // Tolerate a double-close: files share the DB singleton, so teardown can
+    // land twice on the same handle.
     try { testDb.close(); } catch {}
-    testDb = null;
-  }
-}
-
-export function getTestDb(): Database {
-  if (!testDb) throw new Error('Test DB not initialized — call setupTestDb() first');
-  return testDb;
-}
-
-export function teardownTestDb(): void {
-  if (testDb) {
-    testDb.close();
     testDb = null;
   }
 }
