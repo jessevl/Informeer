@@ -49,6 +49,7 @@ import { useConnectivityStore } from '@/stores/connectivity';
 import { EPUB_FONT_FACE_CSS, getEpubFontStack, normalizeEpubFontValue } from '@/lib/epub-fonts';
 import { deleteCachedEpubLocations, readCachedEpubLocations, writeCachedEpubLocations } from '@/lib/epub-locations-cache';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
+import { useOverlayCloseInteraction } from '@/hooks/useOverlayCloseInteraction';
 import { einkPower } from '@/services/eink-power';
 
 type ReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
@@ -416,13 +417,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     });
   }, [clearRestoreGuard, setRestoreGuardPhase]);
 
-  const handleCloseInteraction = useCallback((event?: { preventDefault?: () => void; stopPropagation?: () => void; nativeEvent?: Event }) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    const nativeEvent = event?.nativeEvent as (Event & { stopImmediatePropagation?: () => void }) | undefined;
-    nativeEvent?.stopImmediatePropagation?.();
-    window.setTimeout(() => onClose(), 0);
-  }, [onClose]);
+  const handleCloseInteraction = useOverlayCloseInteraction(onClose);
 
   // --- Offline save state ---
   const offlineItem = useMemo(

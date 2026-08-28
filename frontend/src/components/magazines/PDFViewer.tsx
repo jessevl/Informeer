@@ -29,6 +29,7 @@ import {
 } from '@/components/reader';
 import { useEinkWorkTag, useReaderWakeHandlers } from '@/components/reader/useEinkReaderLifecycle';
 import { useRemoteProgressSync } from '@/hooks/useRemoteProgressSync';
+import { useOverlayCloseInteraction } from '@/hooks/useOverlayCloseInteraction';
 import { getCachedBlob, removeOfflineItem, saveMagazineOffline, saveMagazineOfflineData, setOfflineItemRetention } from '@/lib/offline/blob-cache';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { useOfflineRegistry } from '@/stores/offline';
@@ -181,13 +182,7 @@ export function PDFViewer({
   const isAutoCachedOffline = offlineRetention === 'recent';
   const [isSavingOffline, setIsSavingOffline] = useState(false);
 
-  const handleCloseInteraction = useCallback((event?: { preventDefault?: () => void; stopPropagation?: () => void; nativeEvent?: Event }) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    const nativeEvent = event?.nativeEvent as (Event & { stopImmediatePropagation?: () => void }) | undefined;
-    nativeEvent?.stopImmediatePropagation?.();
-    window.setTimeout(() => onClose(), 0);
-  }, [onClose]);
+  const handleCloseInteraction = useOverlayCloseInteraction(onClose);
 
   // Cross-device progress sync
   const numEntryId = entryId ? parseInt(entryId, 10) : 0;
