@@ -12,13 +12,53 @@
  *
  * Neither `preventDefault` nor `stopPropagation` on the pointerdown helps: the
  * click is a separate, later event with nothing left to stop. So after a
- * pointerdown-initiated close we swallow exactly one capture-phase click,
- * which closes the window in which the element underneath is exposed.
+ * pointerdown-initiated close we swallow exactly one capture-phase click.
+ *
+ * The guard deliberately lives at module scope rather than in the component.
+ * Its whole purpose is to outlive the unmount it is protecting against, so
+ * tying it to the hook's lifecycle would have it torn down by the very unmount
+ * whose trailing click it needs to catch.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 
-/** How long to wait for the synthesised click before dropping the guard. */
-const GHOST_CLICK_WINDOW_MS = 350;
+/** Grace period after release for the synthesised click to arrive. */
+const CLICK_AFTER_RELEASE_MS = 400;
+/** Ceiling, in case no release ever arrives (cancelled gesture, lost pointer). */
+const MAX_GUARD_MS = 5000;
+
+/**
+ * Swallow the next capture-phase click, so it cannot reach whatever the
+ * closing overlay was covering. Self-disarms on that click, shortly after the
+ * pointer is released, or at the ceiling — whichever comes first.
+ *
+ * The release-anchored timer matters: a press held for a while still emits its
+ * click on release, long after the pointerdown that armed this.
+ */
+function armGhostClickGuard(): void {
+  let timer = window.setTimeout(disarm, MAX_GUARD_MS);
+
+  function disarm() {
+    window.clearTimeout(timer);
+    window.removeEventListener('click', swallow, true);
+    window.removeEventListener('pointerup', onRelease, true);
+  }
+
+  function swallow(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    disarm();
+  }
+
+  function onRelease() {
+    window.removeEventListener('pointerup', onRelease, true);
+    window.clearTimeout(timer);
+    timer = window.setTimeout(disarm, CLICK_AFTER_RELEASE_MS);
+  }
+
+  window.addEventListener('click', swallow, true);
+  window.addEventListener('pointerup', onRelease, true);
+}
 
 interface CloseInteractionEvent {
   preventDefault?: () => void;
@@ -30,10 +70,6 @@ export function useOverlayCloseInteraction(onClose: () => void) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Uninstaller for a currently-armed click guard, so unmount can clean up.
-  const disarmRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => disarmRef.current?.(), []);
-
   return useCallback((event?: CloseInteractionEvent) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -43,24 +79,7 @@ export function useOverlayCloseInteraction(onClose: () => void) {
     // Only a pointerdown produces a trailing click; arming after a real click
     // would swallow the user's next, unrelated one.
     if (nativeEvent?.type === 'pointerdown') {
-      disarmRef.current?.();
-
-      let timer = 0;
-      const disarm = () => {
-        window.removeEventListener('click', swallow, true);
-        window.clearTimeout(timer);
-        if (disarmRef.current === disarm) disarmRef.current = null;
-      };
-      function swallow(e: MouseEvent) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        disarm();
-      }
-
-      window.addEventListener('click', swallow, true);
-      timer = window.setTimeout(disarm, GHOST_CLICK_WINDOW_MS);
-      disarmRef.current = disarm;
+      armGhostClickGuard();
     }
 
     window.setTimeout(() => onCloseRef.current(), 0);
