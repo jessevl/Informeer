@@ -22,7 +22,8 @@
     "android:emulator:list": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export JAVA_HOME ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/emulator/emulator\" -list-avds'",
     "android:emulator:start": "sh -c 'JAVA_HOME=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"; ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export JAVA_HOME ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/emulator/emulator\" -avd Medium_Tablet'",
     "android:devices": "sh -c 'ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/platform-tools/adb\" devices'",
-    "android:launch": "sh -c 'ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/platform-tools/adb\" shell am start -n com.informeer.app/.MainActivity'"
+    "android:launch": "sh -c 'ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"; export ANDROID_SDK_ROOT; \"$ANDROID_SDK_ROOT/platform-tools/adb\" shell am start -n com.informeer.app/.MainActivity'",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
