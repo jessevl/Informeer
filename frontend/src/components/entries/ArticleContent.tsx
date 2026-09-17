@@ -17,6 +17,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useVideoStore, getVideoEnclosure } from '@/stores/video';
 import { useMediaQueueStore } from '@/stores/mediaQueue';
 import { ImageGallery } from '@/components/reader/ImageGallery';
+import { useBackGestureClose } from '@/hooks/useBackGestureClose';
 import { EPUB_FONT_FACE_CSS } from '@/lib/epub-fonts';
 import { getTypographyFontFamily, isOriginalTypography } from '@/lib/typography';
 import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
@@ -238,6 +239,10 @@ export function ArticleContent({
   const contentRef = useRef<HTMLDivElement>(null);
   const [galleryImages, setGalleryImages] = useState<string[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
+
+  // The lightbox covers the article, so Back should dismiss it before the
+  // article underneath it.
+  useBackGestureClose(galleryImages !== null, () => setGalleryImages(null));
 
   const handleContentClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;

@@ -16,7 +16,7 @@ function LoginPage() {
 
     const success = await login(username, password, backendUrl);
     if (success) {
-      navigate({ to: '/' });
+      navigate({ to: '/', replace: true });
     }
   };
 

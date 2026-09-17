@@ -23,7 +23,7 @@ import { useModulesStore } from '@/stores/modules';
 import { TTSMiniPlayer } from '@/components/tts/TTSMiniPlayer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
-import { useBackGestureClose } from '@/hooks/useBackGestureClose';
+import { useBackGestureClose, useBackGestureDepth } from '@/hooks/useBackGestureClose';
 import { PODCASTS_YOUTUBE_ENABLED } from '@/config/features';
 import type { Entry, Feed } from '@/types/api';
 
@@ -281,7 +281,7 @@ function HomePage() {
   const isReaderOpen = !!selectedEntry && mediaType !== 'audio' && mediaType !== 'video';
   useBackGestureClose(isReaderOpen, handleGoBack);
   useBackGestureClose(selectedChannelId !== null, handleGoBack);
-  useBackGestureClose(navigationHistory.length > 0, handleGoBack);
+  useBackGestureDepth(navigationHistory.length, handleGoBack);
   useBackGestureClose(searchOpen, () => setSearchOpen(false));
   useBackGestureClose(settingsOpen, () => setSettingsOpen(false));
   useBackGestureClose(addFeedOpen, () => { setAddFeedOpen(false); setAddFeedInitialCategory(undefined); });

@@ -1,74 +1,61 @@
 /**
- * useBackGestureClose
+ * useBackGestureClose / useBackGestureDepth
  *
- * Makes a UI "layer" (a modal, drill-down view, article/book/magazine
- * reader, etc.) consume the browser/OS Back action so that pressing the
- * browser Back button — or an Android/iOS PWA edge-swipe — closes the
- * top-most open layer instead of navigating the whole app to a previous
- * view or exiting the installed PWA.
- *
- * Implementation notes — why `useBlocker` and not synthetic history entries:
- * this app uses TanStack Router, which owns `window.history`. It throttles
- * history writes through a microtask (coalescing near-simultaneous pushes)
- * and classifies popstate as BACK/FORWARD/GO purely from a `__TSR_index`
- * delta. Pushing our own dummy `history.pushState` entries fought all of
- * that and proved unreliable in practice (Back would skip the reader or
- * navigate the view behind it). Instead we use the router's purpose-built
- * navigation blocker: `useBlocker` intercepts the Back at TanStack's own
- * popstate handler, we close the overlay, and TanStack restores the history
- * position — so nothing behind the overlay moves and no entries desync.
- *
- * Priority: every open layer registers into a shared LIFO stack. When Back
- * fires, TanStack asks every blocker whether to block; only the layer that
- * is currently on top of the stack answers yes (closing itself). That makes
- * nested screens (e.g. category list -> article reader, or books overview
- * -> reader) unwind exactly one level per Back, regardless of the order in
- * which the individual blockers happen to be registered.
+ * React bindings for the app's back stack: they give every open layer (a
+ * modal, a drill-down view, the article/PDF/EPUB readers) a real browser
+ * history entry, so Back — the Android/PWA back gesture, the browser's Back
+ * button, a mouse thumb button — closes the top-most layer instead of leaving
+ * the app. See `@/lib/back-stack` for how that is kept in sync with TanStack
+ * Router's history.
  */
 import { useEffect, useRef } from 'react';
-import { useBlocker } from '@tanstack/react-router';
+import { useRouter } from '@tanstack/react-router';
+import {
+  attachBackStack,
+  createBackGroup,
+  releaseBackGroup,
+  setBackGroupDepth,
+  type BackGroup,
+} from '@/lib/back-stack';
 
-// Shared LIFO stack of the ids of every currently-open layer.
-let stack: number[] = [];
-let nextId = 0;
+/**
+ * Give a layer `depth` history entries of its own.
+ *
+ * `onPop` is called once for every entry Back takes away, so a layer that
+ * keeps its own stack (for example the drill-down view history) can pass its
+ * length and unwind one level per press.
+ */
+export function useBackGestureDepth(depth: number, onPop: () => void) {
+  const router = useRouter();
 
-export function useBackGestureClose(isOpen: boolean, onClose: () => void) {
-  // Stable id for this hook instance.
-  const idRef = useRef<number>(-1);
-  if (idRef.current === -1) idRef.current = nextId++;
-  const id = idRef.current;
+  const onPopRef = useRef(onPop);
+  onPopRef.current = onPop;
 
-  // Latest values read from inside the (long-lived) blocker callback.
-  const isOpenRef = useRef(isOpen);
-  isOpenRef.current = isOpen;
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const groupRef = useRef<BackGroup | null>(null);
+  if (groupRef.current === null) {
+    groupRef.current = createBackGroup(() => onPopRef.current());
+  }
+  const group = groupRef.current;
 
-  // Maintain LIFO membership in the shared stack as this layer opens/closes.
   useEffect(() => {
-    if (isOpen) {
-      if (!stack.includes(id)) stack.push(id);
-    } else {
-      stack = stack.filter((x) => x !== id);
-    }
-    return () => {
-      stack = stack.filter((x) => x !== id);
-    };
-  }, [isOpen, id]);
+    attachBackStack(router.history);
+    return () => releaseBackGroup(group);
+  }, [group, router]);
 
-  useBlocker({
-    disabled: !isOpen,
-    // Don't add a "Leave site?" beforeunload prompt — we only care about
-    // in-app Back navigation.
-    enableBeforeUnload: false,
-    shouldBlockFn: ({ action }) => {
-      if (!isOpenRef.current) return false;
-      // Only backward navigation (Back button / PWA back gesture).
-      if (action !== 'BACK') return false;
-      // Only the top-most open layer consumes this Back.
-      if (stack[stack.length - 1] !== id) return false;
-      onCloseRef.current();
-      return true; // block the navigation; TanStack restores the position
-    },
+  // Deliberately runs on every render rather than only when `depth` changes:
+  // several layers share one `onPop` (the app's single "go back" handler), so
+  // a press can close a layer other than the one that owned the entry.
+  // Re-checking every render lets the back stack heal that drift; it is a
+  // no-op once the pushed entries match.
+  useEffect(() => {
+    setBackGroupDepth(group, depth);
   });
+}
+
+/**
+ * Make an open/closed layer (a modal, a reader, a drill-down) consume one
+ * Back press: while `isOpen`, Back calls `onClose` instead of leaving the app.
+ */
+export function useBackGestureClose(isOpen: boolean, onClose: () => void) {
+  useBackGestureDepth(isOpen ? 1 : 0, onClose);
 }

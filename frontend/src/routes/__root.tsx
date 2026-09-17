@@ -84,7 +84,7 @@ function RootComponent() {
       setIsChecking(false);
       
       if (!isValid) {
-        navigate({ to: '/login' });
+        navigate({ to: '/login', replace: true });
       }
     };
     init();
