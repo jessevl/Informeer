@@ -37,6 +37,10 @@ interface TypographyPanelProps {
   alwaysShowColumns?: boolean;
   /** Optional reader-specific status/details block shown near the preview. */
   footerContent?: ReactNode;
+  /** Optional reader-specific controls shown at the top of the panel body (e.g. color schemes). */
+  leadingContent?: ReactNode;
+  /** 'sheet' docks to the right edge below the toolbar; 'popover' floats as a rounded card. */
+  variant?: 'sheet' | 'popover';
 }
 
 export function TypographyPanel({
@@ -56,7 +60,10 @@ export function TypographyPanel({
   showReadingModeControl = true,
   alwaysShowColumns = false,
   footerContent,
+  leadingContent,
+  variant = 'sheet',
 }: TypographyPanelProps) {
+  const isPopover = variant === 'popover';
   const update = (partial: Partial<TypographySettings>) => {
     onChange({ ...settings, ...partial, preset: 'custom' });
   };
@@ -82,16 +89,31 @@ export function TypographyPanel({
   return (
     <div
       className={cn(
-        'absolute right-0 bottom-0 z-40 w-80 max-w-[90vw]',
-        'bg-[var(--color-surface-primary)] border-l border-[var(--color-border-default)]',
-        'shadow-xl overflow-y-auto',
-        'animate-fade-in',
+        isPopover
+          ? [
+              'absolute right-3 z-40 w-80 max-w-[calc(100vw-1.5rem)]',
+              'rounded-2xl border border-[var(--color-border-default)]',
+              'bg-[var(--color-surface-primary)]/95 backdrop-blur-xl',
+              'shadow-2xl overflow-y-auto overscroll-contain',
+              'origin-top-right animate-popover-in',
+            ].join(' ')
+          : [
+              'absolute right-0 bottom-0 z-40 w-80 max-w-[90vw]',
+              'bg-[var(--color-surface-primary)] border-l border-[var(--color-border-default)]',
+              'shadow-xl overflow-y-auto',
+              'animate-fade-in',
+            ].join(' '),
         className,
       )}
-      style={{ top: topOffset }}
+      style={isPopover
+        ? { top: topOffset, maxHeight: `calc(100dvh - ${topOffset} - 1rem)` }
+        : { top: topOffset }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)]">
+      <div className={cn(
+        'flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)]',
+        isPopover && 'sticky top-0 z-10 bg-[var(--color-surface-primary)]/95 backdrop-blur-xl',
+      )}>
         <div className="flex items-center gap-2">
           <Type size={16} className="text-[var(--color-text-secondary)]" />
           <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Typography</h3>
@@ -120,6 +142,8 @@ export function TypographyPanel({
       </div>
 
       <div className="p-4 space-y-5">
+        {leadingContent}
+
         {/* Font Family */}
         <div>
           <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">

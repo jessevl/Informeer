@@ -16,7 +16,7 @@
  * - Table of contents sidebar
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
   X, Sun, Moon, Monitor, Type, List, Loader2,
@@ -26,6 +26,7 @@ import { api } from '@/api/client';
 import { useBooksStore } from '@/stores/books';
 import { useSettingsStore } from '@/stores/settings';
 import type { EpubReaderTheme } from '@/stores/settings';
+import { getEpubReaderTheme } from '@/lib/epub-reader-themes';
 import type { Book } from '@/types/api';
 import ePub, { EpubCFI } from 'epubjs';
 import type { Book as EpubBook, Rendition, Contents } from 'epubjs';
@@ -43,6 +44,7 @@ import { useEinkWorkTag, useReaderWakeHandlers } from '@/components/reader/useEi
 import { getTapZoneAction } from '@/components/reader/tap-zones';
 import { useRemoteProgressSync } from '@/hooks/useRemoteProgressSync';
 import { TypographyPanel, DEFAULT_TYPOGRAPHY } from '@/components/reader/TypographyPanel';
+import { ReaderColorSchemePicker } from '@/components/reader/ReaderColorSchemePicker';
 import type { TypographySettings } from '@/components/reader/TypographyPanel';
 import { getCachedBlob, getOfflineItem, removeOfflineItem, saveBookOffline, saveBookOfflineData, setOfflineItemRetention } from '@/lib/offline/blob-cache';
 import { useOfflineRegistry } from '@/stores/offline';
@@ -55,7 +57,7 @@ import { einkPower } from '@/services/eink-power';
 
 applyEpubjsPatches();
 
-type ReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
+type ReaderTheme = EpubReaderTheme;
 type PageNumberMode = 'source' | 'synthetic' | 'percent';
 const APP_THEME_ORDER = ['light', 'system', 'dark'] as const;
 
@@ -298,6 +300,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const [showControls, setShowControls] = useState(() => !useSettingsStore.getState().einkMode);
   const showControlsRef = useRef(showControls);
   useEffect(() => { showControlsRef.current = showControls; }, [showControls]);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!showControls || !el) return;
+    const measure = () => setHeaderHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [showControls]);
 
   // --- Spread mode ---
   const [isSpreadView, setIsSpreadView] = useState(false);
@@ -312,6 +325,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const einkMode = useSettingsStore(s => s.einkMode);
   const epubLightTheme = useSettingsStore(s => s.epubLightTheme);
   const epubDarkTheme = useSettingsStore(s => s.epubDarkTheme);
+  const setEpubLightTheme = useSettingsStore(s => s.setEpubLightTheme);
+  const setEpubDarkTheme = useSettingsStore(s => s.setEpubDarkTheme);
   const recentOfflineBooksLimit = useSettingsStore(s => s.recentOfflineBooksLimit);
   const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   const offlineRegistry = useOfflineRegistry();
@@ -343,7 +358,12 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const readerTheme: ReaderTheme = einkMode
     ? (resolvedAppIsDark ? 'eink-dark' : 'eink')
     : (resolvedAppIsDark ? epubDarkTheme : epubLightTheme);
-  const isReaderDark = readerTheme === 'dark' || readerTheme === 'eink-dark';
+  const isReaderDark = getEpubReaderTheme(readerTheme).isDark;
+  // The panel edits the scheme for whichever app mode is active right now.
+  const handleColorSchemeChange = useCallback((theme: EpubReaderTheme) => {
+    if (resolvedAppIsDark) setEpubDarkTheme(theme);
+    else setEpubLightTheme(theme);
+  }, [resolvedAppIsDark, setEpubDarkTheme, setEpubLightTheme]);
 
   // --- Typography ---
   const [showTypography, setShowTypography] = useState(false);
@@ -879,6 +899,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           minSpreadWidth: wantSpread ? 1 : 800,
           flow: 'paginated',
           allowScriptedContent: true,
+          // Side margin is implemented as the column gap: epubjs pads every
+          // page by gap/2 on both sides (body padding can't do per-page margins).
+          gap: getEpubColumnGap(typography),
         } as any);
         renditionRef.current = rendition;
 
@@ -1352,6 +1375,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   }, [showControls, showToc, showTypography, controlsTick]);
 
   // === TOC navigation ===
+  const scrollCurrentTocItemIntoView = useCallback((el: HTMLButtonElement | null) => {
+    el?.scrollIntoView({ block: 'center' });
+  }, []);
   const goToTocItem = useCallback((href: string) => {
     startEinkWork('toc');
     markUserNavigation();
@@ -1462,16 +1488,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     return undefined;
   }, [minutesLeftChapter, minutesLeftBook]);
 
-  // === Theme-aware colors for wrapper and page margin indicators ===
-  const themeColors = useMemo(() => {
-    switch (readerTheme) {
-      case 'sepia': return { bg: '#f4ecd8', fg: 'rgba(91,70,54,0.15)' };
-      case 'dark': return { bg: '#1a1a1a', fg: 'rgba(232,232,232,0.15)' };
-      case 'eink': return { bg: '#ffffff', fg: 'rgba(0,0,0,0.18)' };
-      case 'eink-dark': return { bg: '#000000', fg: 'rgba(255,255,255,0.24)' };
-      default: return { bg: '#ffffff', fg: 'rgba(26,26,26,0.12)' };
-    }
-  }, [readerTheme]);
+  // === Theme-aware background for the wrapper around the epub iframes ===
+  const themeColors = useMemo(() => ({ bg: getEpubReaderTheme(readerTheme).bg }), [readerTheme]);
 
   // === Animation styles for the epub container ===
   const pageStyle = getPageStyle({
@@ -1479,7 +1497,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     panOffset: { x: 0, y: 0 },
     swipeOffset: gestures.swipeOffset,
   });
-  const overlayTopOffset = 'calc(max(env(safe-area-inset-top, 0px), 8px) + 52px)';
+  // Popovers float just below the toolbar. Measure the toolbar instead of
+  // estimating its height — the estimate drifted with safe-area insets.
+  const popoverTop = headerHeight != null
+    ? `${headerHeight + 8}px`
+    : 'calc(max(env(safe-area-inset-top, 0px), 8px) + 60px)';
 
   return (
     <div
@@ -1494,6 +1516,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       {/* ─── Header ─── */}
       {showControls && (
         <div
+          ref={headerRef}
           className={cn(
             'absolute top-0 left-0 right-0 z-20',
             'flex items-center justify-between px-3 py-2',
@@ -1599,34 +1622,56 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         </div>
       )}
 
-      {/* ─── TOC sidebar ─── */}
+      {/* ─── TOC popover ─── */}
       {showToc && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setShowToc(false)} />
-          <div className={cn(
-            'absolute left-0 bottom-0 z-40 w-72',
-            'bg-[var(--color-surface-primary)] border-r border-[var(--color-border-default)]',
-            'shadow-lg overflow-y-auto animate-fade-in',
-            'reader-overlay-surface',
-          )}
-            style={{ top: overlayTopOffset }}>
-            <div className="px-4 py-3 border-b border-[var(--color-border-subtle)]">
-              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Contents</h3>
-            </div>
-            {tocItems.map((item, i) => (
+          <div
+            className={cn(
+              'absolute left-3 z-40 w-80 max-w-[calc(100vw-1.5rem)]',
+              'rounded-2xl border border-[var(--color-border-default)]',
+              'bg-[var(--color-surface-primary)]/95 backdrop-blur-xl shadow-2xl',
+              'flex flex-col overflow-hidden origin-top-left animate-popover-in',
+              'reader-overlay-surface',
+            )}
+            style={{ top: popoverTop, maxHeight: `calc(100dvh - ${popoverTop} - 1rem)` }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)] shrink-0">
+              <div className="flex items-center gap-2">
+                <List size={16} className="text-[var(--color-text-secondary)]" />
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Contents</h3>
+              </div>
               <button
-                key={i}
-                onClick={() => goToTocItem(item.href)}
-                className={cn(
-                  'w-full text-left px-4 py-2.5 text-sm',
-                  'hover:bg-[var(--color-surface-hover)] transition-colors',
-                  'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]',
-                  'border-b border-[var(--color-border-subtle)]',
-                )}
+                onClick={() => setShowToc(false)}
+                className="p-1.5 rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
+                title="Close contents"
               >
-                {item.label}
+                <X size={16} className="text-[var(--color-text-tertiary)]" />
               </button>
-            ))}
+            </div>
+            <div className="overflow-y-auto overscroll-contain p-1.5">
+              {tocItems.length === 0 && (
+                <p className="px-3 py-4 text-sm text-[var(--color-text-tertiary)]">No table of contents.</p>
+              )}
+              {tocItems.map((item, i) => {
+                const isCurrent = !!chapter && item.label === chapter;
+                return (
+                  <button
+                    key={i}
+                    ref={isCurrent ? scrollCurrentTocItemIntoView : undefined}
+                    onClick={() => goToTocItem(item.href)}
+                    className={cn(
+                      'w-full text-left px-3 py-2 text-sm rounded-lg transition-colors',
+                      isCurrent
+                        ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)] font-medium'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </>
       )}
@@ -1640,7 +1685,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             onChange={handleTypographyChange}
             onClose={() => setShowTypography(false)}
             isDarkMode={isReaderDark}
-            topOffset={overlayTopOffset}
+            variant="popover"
+            className="reader-overlay-surface"
+            topOffset={popoverTop}
+            leadingContent={(
+              <ReaderColorSchemePicker
+                value={readerTheme}
+                onChange={handleColorSchemeChange}
+                appIsDark={resolvedAppIsDark}
+                einkMode={einkMode}
+              />
+            )}
             showReadingModeControl={false}
             alwaysShowColumns={true}
             maxPaginatedColumns={2}
@@ -1791,6 +1846,29 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 // Theme + Typography application
 // ==========================================================================
 
+/**
+ * Column gap for the configured side margin. In paginated mode epubjs pads
+ * each page by gap/2 on both sides (inline, !important on body), so the gap
+ * is the only thing that produces a per-page side margin. `undefined` lets
+ * epubjs pick its automatic gap for the "Original" preset.
+ */
+function getEpubColumnGap(typo: TypographySettings): number | undefined {
+  if (typo.preset === 'original') return undefined;
+  return Math.max(0, Math.round(typo.margin)) * 2;
+}
+
+function applyEpubColumnGap(rendition: Rendition, typo: TypographySettings) {
+  const gap = getEpubColumnGap(typo);
+  const renditionAny = rendition as any;
+  const manager = renditionAny.manager;
+  if (renditionAny.settings) renditionAny.settings.gap = gap;
+  if (!manager?.settings || manager.settings.gap === gap) return;
+
+  manager.settings.gap = gap;
+  // Re-lay out existing views; the caller restores the reading anchor after.
+  if (manager.isRendered?.()) manager.updateLayout();
+}
+
 function applyThemeAndTypography(
   rendition: Rendition,
   theme: ReaderTheme,
@@ -1809,7 +1887,6 @@ function applyThemeAndTypography(
   const vMargin = isOriginal ? 0 : typo.verticalMargin ?? 0;
   const safePaddingTop = getEpubVerticalPaddingCss(vMargin, 'top', EPUB_CONTENT_TOP_CLEARANCE_PX);
   const safePaddingBottom = getEpubVerticalPaddingCss(vMargin, 'bottom', EPUB_CONTENT_BOTTOM_CLEARANCE_PX);
-  const sideMargin = isOriginal ? undefined : `${typo.margin}px`;
 
   const bodyStyle: Record<string, string> = {};
   if (!useOriginalFont) bodyStyle['font-family'] = `${fontFamily} !important`;
@@ -1821,10 +1898,6 @@ function applyThemeAndTypography(
   bodyStyle['box-sizing'] = 'border-box !important';
   bodyStyle['padding-top'] = `${safePaddingTop} !important`;
   bodyStyle['padding-bottom'] = `${safePaddingBottom} !important`;
-  if (sideMargin) {
-    bodyStyle['padding-left'] = `${sideMargin} !important`;
-    bodyStyle['padding-right'] = `${sideMargin} !important`;
-  }
 
   // Apply line-height and text-align to content elements too, so they
   // override element-level styles from the epub's own CSS
@@ -1837,15 +1910,7 @@ function applyThemeAndTypography(
     pStyle['margin-bottom'] = `${typo.paragraphSpacing}em !important`;
   }
 
-  // Color palettes per theme
-  const colors = {
-    light: { bg: '#ffffff', fg: '#1a1a1a', link: '#2563eb' },
-    sepia: { bg: '#f4ecd8', fg: '#5b4636', link: '#8b5e34' },
-    dark:  { bg: '#1a1a1a', fg: '#e8e8e8', link: '#60a5fa' },
-    eink: { bg: '#ffffff', fg: '#000000', link: '#000000' },
-    'eink-dark': { bg: '#000000', fg: '#ffffff', link: '#ffffff' },
-  };
-  const { bg, fg, link } = colors[theme];
+  const { bg, fg, link } = getEpubReaderTheme(theme);
 
   // Register under a single name so select() reliably replaces the active styles.
   // Apply line-height / text-align to common content elements so they override
@@ -1874,6 +1939,8 @@ function applyThemeAndTypography(
     rendition.themes.fontSize('100%');
   }
 
+  applyEpubColumnGap(rendition, typo);
+
   for (const content of rendition.getContents() as unknown as Contents[]) {
     const doc = (content as any).document as Document | undefined;
     if (doc) {
@@ -1894,20 +1961,12 @@ function applyThemeAndTypographyToDocument(
   const lineHeight = isOriginal ? undefined : String(typo.lineHeight);
   const textAlign = isOriginal || typo.textAlign === 'original' ? undefined : typo.textAlign;
   const hyphens = isOriginal ? undefined : (typo.hyphenation ? 'auto' : 'manual');
-  const sideMargin = isOriginal ? '0px' : `${typo.margin}px`;
   const verticalMargin = isOriginal ? 0 : typo.verticalMargin ?? 0;
   const paddingTop = getEpubVerticalPaddingCss(verticalMargin, 'top', EPUB_CONTENT_TOP_CLEARANCE_PX);
   const paddingBottom = getEpubVerticalPaddingCss(verticalMargin, 'bottom', EPUB_CONTENT_BOTTOM_CLEARANCE_PX);
   const paragraphSpacing = isOriginal ? undefined : `${typo.paragraphSpacing}em`;
 
-  const colors = {
-    light: { bg: '#ffffff', fg: '#1a1a1a', link: '#2563eb' },
-    sepia: { bg: '#f4ecd8', fg: '#5b4636', link: '#8b5e34' },
-    dark: { bg: '#1a1a1a', fg: '#e8e8e8', link: '#60a5fa' },
-    eink: { bg: '#ffffff', fg: '#000000', link: '#000000' },
-    'eink-dark': { bg: '#000000', fg: '#ffffff', link: '#ffffff' },
-  } as const;
-  const { bg, fg, link } = colors[theme];
+  const { bg, fg, link } = getEpubReaderTheme(theme);
 
   let style = doc.getElementById(styleId) as HTMLStyleElement | null;
   if (!style) {
@@ -1930,9 +1989,7 @@ function applyThemeAndTypographyToDocument(
       background: ${bg} !important;
       color: ${fg} !important;
       padding-top: ${paddingTop} !important;
-      padding-right: ${sideMargin} !important;
       padding-bottom: ${paddingBottom} !important;
-      padding-left: ${sideMargin} !important;
       ${!useOriginalFont ? `font-family: ${fontFamily} !important;` : ''}
       ${lineHeight ? `line-height: ${lineHeight} !important;` : ''}
       ${textAlign ? `text-align: ${textAlign} !important;` : ''}

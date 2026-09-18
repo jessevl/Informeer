@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_ARTICLE_TYPOGRAPHY, normalizeArticleTypographySettings } from '@/lib/typography';
 import type { TypographySettings } from '@/lib/typography';
+import type { EpubReaderTheme } from '@/lib/epub-reader-themes';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type ThemeVariant = 'warm' | 'cool';
@@ -19,7 +20,7 @@ export type ThemeVariant = 'warm' | 'cool';
 export type AccentColor = 'coral' | 'amber' | 'blue' | 'green' | 'red' | 'purple' | 'pink' | 'teal' | 'stone' | null;
 
 /** EPUB reader colour palettes */
-export type EpubReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
+export type { EpubReaderTheme } from '@/lib/epub-reader-themes';
 
 /**
  * View modes for the entry list
