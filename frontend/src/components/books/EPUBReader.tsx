@@ -27,8 +27,9 @@ import { useBooksStore } from '@/stores/books';
 import { useSettingsStore } from '@/stores/settings';
 import type { EpubReaderTheme } from '@/stores/settings';
 import type { Book } from '@/types/api';
-import ePub from 'epubjs';
+import ePub, { EpubCFI } from 'epubjs';
 import type { Book as EpubBook, Rendition, Contents } from 'epubjs';
+import { applyEpubjsPatches } from '@/lib/epubjs-patches';
 import {
   useReaderGestures,
   useReaderAnimation,
@@ -51,6 +52,8 @@ import { deleteCachedEpubLocations, readCachedEpubLocations, writeCachedEpubLoca
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
 import { useOverlayCloseInteraction } from '@/hooks/useOverlayCloseInteraction';
 import { einkPower } from '@/services/eink-power';
+
+applyEpubjsPatches();
 
 type ReaderTheme = 'light' | 'sepia' | 'dark' | 'eink' | 'eink-dark';
 type PageNumberMode = 'source' | 'synthetic' | 'percent';
@@ -90,6 +93,11 @@ const EPUB_CONTENT_BOTTOM_CLEARANCE_PX = 40;
 const EPUB_RESTORE_GUARD_SCHEDULED_MS = 2000;
 const EPUB_RESTORE_GUARD_DISPLAYING_MS = 1000;
 const EPUB_LOCATION_BREAK_CHARS = 1600;
+// A relocation within this window after a user navigation (page turn, TOC,
+// seek, link) is attributed to that navigation and may move the anchor.
+const EPUB_USER_NAV_WINDOW_MS = 3000;
+// Debounce for re-checking the anchor after late reflows (fonts, images).
+const EPUB_ANCHOR_CHECK_DELAY_MS = 250;
 
 interface DerivedPagePosition {
   mode: PageNumberMode;
@@ -253,6 +261,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const currentBookDataRef = useRef<Uint8Array | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
   const manualSpreadPreferenceRef = useRef(false);
+  const userNavAtRef = useRef(0);
+  const anchorCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreGuardRef = useRef<{
     phase: 'idle' | 'scheduled' | 'displaying';
     sequence: number;
@@ -417,6 +427,56 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     });
   }, [clearRestoreGuard, setRestoreGuardPhase]);
 
+  // lastKnownCfiRef is the reading-position anchor. Only relocations caused by
+  // user navigation may move it; relocations caused by layout (initial display,
+  // window resize, font/image reflow, spread/typography changes) must not,
+  // otherwise every re-layout re-saves the start of a *different* page and the
+  // position ratchets backwards (a page start is always <= the anchor).
+  const markUserNavigation = useCallback(() => {
+    userNavAtRef.current = performance.now();
+  }, []);
+
+  const isUserNavigationPending = useCallback(() => (
+    userNavAtRef.current > 0 && performance.now() - userNavAtRef.current < EPUB_USER_NAV_WINDOW_MS
+  ), []);
+
+  // Re-display the anchor if a late reflow (web fonts swapping in, images
+  // loading, resize) moved it off-screen. epubjs positions the view once and
+  // never re-seeks, so without this the reader silently shows an earlier page.
+  const ensureAnchorVisible = useCallback(() => {
+    const rendition = renditionRef.current;
+    const anchor = lastKnownCfiRef.current;
+    if (!rendition || !anchor) return;
+    if (restoreGuardRef.current.phase !== 'idle' || isUserNavigationPending()) return;
+
+    try {
+      const location = (rendition as any).currentLocation?.();
+      const start = location?.start?.cfi;
+      const end = location?.end?.cfi;
+      if (!start || !end) return;
+
+      const cfi = new EpubCFI();
+      const anchorVisible = cfi.compare(anchor, start) >= 0 && cfi.compare(anchor, end) <= 0;
+      if (!anchorVisible) {
+        queueRestoreToCfi(anchor, 'anchor-off-screen');
+      }
+    } catch {
+      // Unparseable CFI — leave the view alone.
+    }
+  }, [isUserNavigationPending, queueRestoreToCfi]);
+
+  const scheduleAnchorCheck = useCallback(() => {
+    if (anchorCheckTimerRef.current) clearTimeout(anchorCheckTimerRef.current);
+    anchorCheckTimerRef.current = setTimeout(() => {
+      anchorCheckTimerRef.current = null;
+      ensureAnchorVisible();
+    }, EPUB_ANCHOR_CHECK_DELAY_MS);
+  }, [ensureAnchorVisible]);
+  const scheduleAnchorCheckRef = useRef(scheduleAnchorCheck);
+  scheduleAnchorCheckRef.current = scheduleAnchorCheck;
+  const markUserNavigationRef = useRef(markUserNavigation);
+  markUserNavigationRef.current = markUserNavigation;
+
   const handleCloseInteraction = useOverlayCloseInteraction(onClose);
 
   // --- Offline save state ---
@@ -481,10 +541,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const handleAcceptRemotePosition = useCallback(() => {
     if (remoteSync.remotePosition?.cfi && renditionRef.current) {
       lastKnownCfiRef.current = remoteSync.remotePosition.cfi;
+      markUserNavigation();
       renditionRef.current.display(remoteSync.remotePosition.cfi).catch(() => {});
     }
     remoteSync.acceptRemotePosition();
-  }, [remoteSync]);
+  }, [markUserNavigation, remoteSync]);
 
   // --- Page info ---
   const [currentPageOverall, setCurrentPageOverall] = useState(0);
@@ -559,6 +620,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       if (!action || attemptRef.current) return false;
 
       attemptRef.current = true;
+      markUserNavigation();
       let cleared = false;
       const clearAttempt = () => {
         if (cleared) return;
@@ -577,7 +639,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
       return true;
     },
-    [],
+    [markUserNavigation],
   );
 
   // Navigation callbacks with animation guard to prevent double-fire
@@ -825,7 +887,12 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
         // Display at saved CFI or start
         if (initialCfi) {
-          rendition.display(initialCfi).catch(() => rendition.display());
+          rendition.display(initialCfi).catch(() => {
+            // Saved CFI is unusable — drop it as the anchor so the first
+            // relocation from the fallback display becomes the new anchor.
+            lastKnownCfiRef.current = '';
+            return rendition.display();
+          });
         } else {
           rendition.display();
         }
@@ -845,10 +912,28 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             });
           });
 
+          const isUserNavigation = isUserNavigationPending();
+          if (isUserNavigation) userNavAtRef.current = 0;
+
+          // A user page turn that lands while a layout restore is scheduled or
+          // in flight wins over the restore — otherwise the turn is dropped and
+          // the pending restore jumps back to the old anchor.
+          if (isUserNavigation && restoreGuardRef.current.phase !== 'idle') {
+            if (restoreFrameRef.current != null) {
+              cancelAnimationFrame(restoreFrameRef.current);
+              restoreFrameRef.current = null;
+            }
+            clearRestoreGuard();
+          }
+
           const restoreGuard = restoreGuardRef.current;
           const shouldSkipProgressPersistence = restoreGuard.phase !== 'idle';
           const visibleStartCfi = location?.start?.cfi || '';
-          if (!shouldSkipProgressPersistence && visibleStartCfi) {
+          if (
+            !shouldSkipProgressPersistence
+            && visibleStartCfi
+            && (isUserNavigation || !lastKnownCfiRef.current)
+          ) {
             lastKnownCfiRef.current = visibleStartCfi;
           }
 
@@ -890,6 +975,12 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
           if (restoreGuard.phase === 'displaying') {
             clearRestoreGuard(restoreGuard.sequence);
+          }
+
+          // Layout-driven relocation (initial display, epubjs' own re-display
+          // on window resize): make sure the anchor is actually on screen.
+          if (!shouldSkipProgressPersistence && !isUserNavigation) {
+            scheduleAnchorCheckRef.current();
           }
 
           // Persist the CFI immediately so reopen/sleep restore the exact spot
@@ -957,6 +1048,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           if (!doc) return;
 
           applyThemeAndTypographyToDocument(doc, readerThemeRef.current, typographyRef.current);
+
+          // Late reflows (web fonts swapping in, images decoding) shift text
+          // after epubjs has positioned the page. Re-check the anchor once they
+          // settle. 'resize' comes from epubjs' ResizeObserver, 'expand' from
+          // its image-load listener; fonts.ready covers same-size font swaps.
+          const scheduleCheck = () => scheduleAnchorCheckRef.current();
+          (contents as any).on?.('resize', scheduleCheck);
+          (contents as any).on?.('expand', scheduleCheck);
+          doc.fonts?.ready.then(scheduleCheck).catch(() => {});
+          // In-book links navigate via epubjs' own handler; treat as user navigation.
+          (contents as any).on?.('linkClicked', () => markUserNavigationRef.current());
 
           // Prevent default browser gestures on the iframe content.
           // Use 'manipulation' (not 'none') — Safari suppresses all touch
@@ -1198,6 +1300,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     return () => {
       cancelled = true;
       if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+      if (anchorCheckTimerRef.current) clearTimeout(anchorCheckTimerRef.current);
+      userNavAtRef.current = 0;
       if (restoreFrameRef.current != null) cancelAnimationFrame(restoreFrameRef.current);
       clearRestoreGuard();
       syncProgress(book.id).catch(() => {});
@@ -1250,9 +1354,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // === TOC navigation ===
   const goToTocItem = useCallback((href: string) => {
     startEinkWork('toc');
+    markUserNavigation();
     renditionRef.current?.display(href);
     setShowToc(false);
-  }, [startEinkWork]);
+  }, [markUserNavigation, startEinkWork]);
 
   // When the user changes columnCount in the typography panel, sync to spread view
   const handleTypographyChange = useCallback((newSettings: TypographySettings) => {
@@ -1279,9 +1384,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
     if (cfi) {
       startEinkWork('seek');
+      markUserNavigation();
       renditionRef.current?.display(cfi);
     }
-  }, [startEinkWork]);
+  }, [markUserNavigation, startEinkWork]);
 
   // === Download EPUB ===
   const handleDownload = useCallback(async () => {
