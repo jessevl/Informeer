@@ -1,6 +1,6 @@
 /**
  * Appearance Section
- * Theme, colors, feed list display, book reader palettes
+ * Theme, colors, feed list display (book reader colors live in the reader's typography panel)
  * All client-side settings (auto-persisted via zustand)
  */
 
@@ -13,7 +13,6 @@ import {
   type ThemeVariant,
   type AccentColor,
   type ViewMode,
-  type EpubReaderTheme,
 } from '@/stores/settings';
 import {
   SegmentedControl,
@@ -67,10 +66,6 @@ const AppearanceSection: React.FC = () => {
   const adDetectionThreshold = useSettingsStore((s) => s.adDetectionThreshold);
   const setAdDetectionThreshold = useSettingsStore((s) => s.setAdDetectionThreshold);
   const magazinesCategoryId = useSettingsStore((s) => s.magazinesCategoryId);
-  const epubLightTheme = useSettingsStore((s) => s.epubLightTheme);
-  const setEpubLightTheme = useSettingsStore((s) => s.setEpubLightTheme);
-  const epubDarkTheme = useSettingsStore((s) => s.epubDarkTheme);
-  const setEpubDarkTheme = useSettingsStore((s) => s.setEpubDarkTheme);
   const confirmMarkAllRead = useSettingsStore((s) => s.confirmMarkAllRead);
   const setConfirmMarkAllRead = useSettingsStore((s) => s.setConfirmMarkAllRead);
   const showReadingTime = useSettingsStore((s) => s.showReadingTime);
@@ -295,83 +290,6 @@ const AppearanceSection: React.FC = () => {
               onChange={setAdDetectionThreshold}
             />
           )}
-        </>
-      )}
-
-      <Separator />
-
-      {/* ── Book Reader ────────────────────────────────────────────────── */}
-      <SectionHeader title="Book Reader" />
-
-      {einkMode ? (
-        <p className="text-sm text-[var(--color-text-tertiary)]">
-          EPUB reader colors follow E-Ink mode automatically.
-        </p>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-[var(--color-text-primary)]">Light Palette</span>
-            <div className="flex gap-1.5">
-              {([
-                { value: 'light' as EpubReaderTheme, label: 'White', swatch: '#ffffff', border: true },
-                { value: 'sepia' as EpubReaderTheme, label: 'Sepia', swatch: '#f4ecd8', border: false },
-                { value: 'eink' as EpubReaderTheme, label: 'E-Ink', swatch: '#ffffff', border: true },
-              ]).map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setEpubLightTheme(opt.value)}
-                  className={cn(
-                    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all',
-                    'bg-[var(--color-surface-secondary)]',
-                    epubLightTheme === opt.value
-                      ? 'ring-2 ring-offset-1 ring-offset-[var(--color-surface-base)] ring-[var(--color-accent-primary)]'
-                      : 'hover:bg-[var(--color-surface-tertiary)]',
-                  )}
-                >
-                  <span
-                    className="w-3.5 h-3.5 rounded-full shadow-sm"
-                    style={{
-                      background: opt.swatch,
-                      border: opt.border ? '1px solid var(--color-border-default)' : undefined,
-                      boxShadow: opt.value === 'eink' ? 'inset 0 0 0 1px #111111' : undefined,
-                    }}
-                  />
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-[var(--color-text-primary)]">Dark Palette</span>
-            <div className="flex gap-1.5">
-              {([
-                { value: 'dark' as EpubReaderTheme, label: 'Dark', swatch: '#1a1a1a' },
-                { value: 'eink-dark' as EpubReaderTheme, label: 'E-Ink', swatch: '#000000' },
-              ]).map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setEpubDarkTheme(opt.value)}
-                  className={cn(
-                    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all',
-                    'bg-[var(--color-surface-secondary)]',
-                    epubDarkTheme === opt.value
-                      ? 'ring-2 ring-offset-1 ring-offset-[var(--color-surface-base)] ring-[var(--color-accent-primary)]'
-                      : 'hover:bg-[var(--color-surface-tertiary)]',
-                  )}
-                >
-                  <span
-                    className="w-3.5 h-3.5 rounded-full shadow-sm"
-                    style={{
-                      background: opt.swatch,
-                      boxShadow: opt.value === 'eink-dark' ? 'inset 0 0 0 1px #f5f5f5' : undefined,
-                    }}
-                  />
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </>
       )}
     </div>

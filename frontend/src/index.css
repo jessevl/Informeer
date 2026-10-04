@@ -107,6 +107,7 @@ html.dark.theme-eink .eink-modal-backdrop {
 
 html.theme-eink .animate-fade-in,
 html.theme-eink .animate-scale-in,
+html.theme-eink .animate-popover-in,
 html.theme-eink .animate-slide-down,
 html.theme-eink .animate-slide-in-right,
 html.theme-eink .animate-slide-up,
@@ -480,6 +481,17 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
 
 .animate-scale-in {
   animation: scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Reader popovers: `backwards` fill so no transform lingers on the element and
+   its own backdrop-filter keeps blurring (see .animate-slide-up note). */
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-popover-in {
+  animation: popover-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .animate-scale-out {

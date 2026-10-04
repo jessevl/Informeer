@@ -148,6 +148,7 @@ Shared infrastructure for EPUB and PDF readers.
 | ReaderNavButtons.tsx | `ReaderNavButtons` | EPUBReader, PDFViewer |
 | ReaderProgressBar.tsx | `ReaderProgressBar` | EPUBReader, PDFViewer |
 | TypographyPanel.tsx | `TypographyPanel` | EPUBReader (not in index.ts) |
+| ReaderColorSchemePicker.tsx | `ReaderColorSchemePicker` | EPUBReader (typography panel, not in index.ts) |
 
 ### `settings/`
 No index.ts — components imported directly.
