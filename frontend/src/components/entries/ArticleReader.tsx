@@ -29,6 +29,10 @@ import { useReaderWakeHandlers, useAutoHideControls } from '@/components/reader/
 import { usePaginationWheel } from '@/components/reader/usePaginationWheel';
 import { ARTICLE_FONT_OPTIONS, DEFAULT_ARTICLE_TYPOGRAPHY } from '@/lib/typography';
 import { useResolvedIsDark } from '@/hooks/useResolvedIsDark';
+import { ReaderColorSchemePicker } from '@/components/reader/ReaderColorSchemePicker';
+import { getReaderSurfaceVars, resolveReaderTheme } from '@/lib/reader-surface';
+import { getEpubReaderTheme } from '@/lib/epub-reader-themes';
+import type { EpubReaderTheme } from '@/lib/epub-reader-themes';
 import { einkPower } from '@/services/eink-power';
 import { getTapZoneAction } from '@/components/reader/tap-zones';
 
@@ -81,12 +85,38 @@ export function ArticleReader({
   const articleTypography = useSettingsStore((s) => s.articleTypography);
   const setArticleTypography = useSettingsStore((s) => s.setArticleTypography);
   const readerToolbarHideDelay = useSettingsStore((s) => s.readerToolbarHideDelay);
+  const articleLightTheme = useSettingsStore((s) => s.articleLightTheme);
+  const articleDarkTheme = useSettingsStore((s) => s.articleDarkTheme);
+  const setArticleLightTheme = useSettingsStore((s) => s.setArticleLightTheme);
+  const setArticleDarkTheme = useSettingsStore((s) => s.setArticleDarkTheme);
   const isPaginated = articleTypography.readingMode === 'paginated';
   // Paginated mode needs full-viewport width for accurate column measurement and
   // layout, so always use the overlay (fixed inset-0) path regardless of device
   // type or eink mode.  Non-paginated scroll mode respects the normal heuristic.
   const isOverlayReaderLayout = isMobile || fullscreen || isPaginated;
   const isDarkMode = useResolvedIsDark();
+  // Page colour works like the book reader's: one scheme remembered per app
+  // mode, so the reader keeps following the app theme automatically.
+  const readerTheme = resolveReaderTheme({
+    einkMode,
+    appIsDark: isDarkMode,
+    lightTheme: articleLightTheme,
+    darkTheme: articleDarkTheme,
+  });
+  const isReaderDark = getEpubReaderTheme(readerTheme).isDark;
+  const readerSurfaceVars = getReaderSurfaceVars(readerTheme);
+  const handleColorSchemeChange = useCallback((theme: EpubReaderTheme) => {
+    if (isDarkMode) setArticleDarkTheme(theme);
+    else setArticleLightTheme(theme);
+  }, [isDarkMode, setArticleDarkTheme, setArticleLightTheme]);
+  const colorSchemePicker = (
+    <ReaderColorSchemePicker
+      value={readerTheme}
+      onChange={handleColorSchemeChange}
+      appIsDark={isDarkMode}
+      einkMode={einkMode}
+    />
+  );
   const entryWorkPrefix = `article:${entry.id}`;
   
   // Per-feed content fetch policy (replaces global autoReaderView)
@@ -774,15 +804,17 @@ export function ArticleReader({
         ref={surfaceRef}
         className={cn(
           'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--color-surface-primary)]',
+          'reader-page-surface',
           !einkMode && 'animate-slide-in-right'
         )}
         style={pullDismiss > 0 ? {
+          ...readerSurfaceVars,
           transform: pullTransform,
           opacity: pullOpacity,
           borderRadius: '12px',
           transition: 'none',
           overflow: 'hidden',
-        } : undefined}
+        } : readerSurfaceVars}
       >
         {/* Reader scroll progress bar */}
         <div className="absolute top-0 left-0 right-0 z-[70] h-0.5 pointer-events-none">
@@ -953,7 +985,9 @@ export function ArticleReader({
               settings={articleTypography}
               onChange={setArticleTypography}
               onClose={() => setShowTypography(false)}
-              isDarkMode={isDarkMode}
+              isDarkMode={isReaderDark}
+              variant="popover"
+              leadingContent={colorSchemePicker}
               className="z-[75]"
               topOffset="calc(env(safe-area-inset-top, 0px) + 3.75rem)"
               fontOptions={ARTICLE_FONT_OPTIONS}
@@ -1025,8 +1059,8 @@ export function ArticleReader({
 
         <div
           ref={surfaceRef}
-          className="relative w-full max-h-[90vh] overflow-hidden rounded-2xl bg-[var(--color-surface-base)] shadow-2xl flex flex-col eink-shell-surface eink-modal-surface"
-          style={{ maxWidth: `min(calc(100vw - 2rem), ${modalMaxWidth})` }}
+          className="reader-page-surface relative w-full max-h-[90vh] overflow-hidden rounded-2xl bg-[var(--color-surface-base)] shadow-2xl flex flex-col eink-shell-surface eink-modal-surface"
+          style={{ ...readerSurfaceVars, maxWidth: `min(calc(100vw - 2rem), ${modalMaxWidth})` }}
         >
           <div className="absolute top-0 left-0 right-0 z-30 h-0 overflow-visible pointer-events-none">
             <div className="flex min-w-0 items-center gap-2 px-3 py-3 pointer-events-auto">
@@ -1070,7 +1104,10 @@ export function ArticleReader({
                 settings={articleTypography}
                 onChange={setArticleTypography}
                 onClose={() => setShowTypography(false)}
-                isDarkMode={isDarkMode}
+                isDarkMode={isReaderDark}
+                variant="popover"
+                leadingContent={colorSchemePicker}
+                popoverMaxHeight="calc(100% - 4.75rem)"
                 topOffset="3.75rem"
                 fontOptions={ARTICLE_FONT_OPTIONS}
                 originalFormattingTitle="Use the article's default formatting"
@@ -1174,7 +1211,11 @@ export function ArticleReader({
   // DESKTOP LAYOUT
   // =========================================================================
   return (
-    <div ref={surfaceRef} className={cn('relative flex flex-col h-full', fullscreen && 'min-h-0')}>
+    <div
+      ref={surfaceRef}
+      className={cn('reader-page-surface relative flex flex-col h-full', fullscreen && 'min-h-0')}
+      style={readerSurfaceVars}
+    >
       {/* Reader scroll progress bar */}
       <div className="absolute top-0 left-0 right-0 z-[40] h-0.5 pointer-events-none">
         <div 
@@ -1240,7 +1281,10 @@ export function ArticleReader({
             settings={articleTypography}
             onChange={setArticleTypography}
             onClose={() => setShowTypography(false)}
-            isDarkMode={isDarkMode}
+            isDarkMode={isReaderDark}
+            variant="popover"
+            leadingContent={colorSchemePicker}
+            popoverMaxHeight="calc(100% - 4.75rem)"
             topOffset="3.75rem"
             fontOptions={ARTICLE_FONT_OPTIONS}
             originalFormattingTitle="Use the article's default formatting"

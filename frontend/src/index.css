@@ -32,6 +32,13 @@
      Glass pills are ~40px tall + 12px vertical padding = ~52px, plus safe-area.
      We use calc() so scrollable content clears the header on notched devices. */
   --mobile-header-offset: calc(max(var(--safe-area-top), 8px) + 52px);
+
+  /* Bare accent alias. Several components use `var(--color-accent)`, which the
+     Frameer token set does not define — without this the rings and badges that
+     reference it resolve to an invalid colour and disappear. Declared as a
+     reference so it resolves at each use site, following the active theme and
+     any scoped override (e.g. a reader's page colour). */
+  --color-accent: var(--color-accent-primary);
 }
 
 html {
@@ -573,5 +580,17 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
   border-radius: 9999px;
   background: color-mix(in srgb, var(--color-surface-base) 75%, transparent);
   background-image: linear-gradient(135deg, color-mix(in srgb, var(--color-accent-primary) 6%, transparent) 0%, transparent 65%);
+  box-shadow: none;
+}
+
+/* A reader that carries its own page colour (the article reader remaps the
+   colour tokens on its root) needs its glass toolbars to follow that colour.
+   `.dark .glass-panel-nav` in base.css hardcodes a grey and outranks the
+   single-class rule above, so match its specificity and win on order. */
+.reader-page-surface .glass-toolbar,
+.reader-page-surface .glass-panel-nav {
+  background: color-mix(in srgb, var(--color-surface-base) 75%, transparent);
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--color-accent-primary) 6%, transparent) 0%, transparent 65%);
+  border: 1px solid var(--color-border-default);
   box-shadow: none;
 }

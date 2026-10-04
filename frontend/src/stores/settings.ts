@@ -79,6 +79,11 @@ interface SettingsState {
   epubLightTheme: EpubReaderTheme;   // reader palette when app is in light mode
   epubDarkTheme: EpubReaderTheme;    // reader palette when app is in dark mode
 
+  // Article reader — kept separate from the book reader, like articleTypography,
+  // so long-form articles and books can use different page colours.
+  articleLightTheme: EpubReaderTheme;
+  articleDarkTheme: EpubReaderTheme;
+
   // Media category assignments (Informeer category IDs)
   // When set, the corresponding tab appears in navigation
   audioCategoryId: number | null;
@@ -113,6 +118,8 @@ interface SettingsState {
   setAdDetectionThreshold: (threshold: number) => void;
   setEpubLightTheme: (theme: EpubReaderTheme) => void;
   setEpubDarkTheme: (theme: EpubReaderTheme) => void;
+  setArticleLightTheme: (theme: EpubReaderTheme) => void;
+  setArticleDarkTheme: (theme: EpubReaderTheme) => void;
   setAudioCategoryId: (id: number | null) => void;
   setVideoCategoryId: (id: number | null) => void;
   setMagazinesCategoryId: (id: number | null) => void;
@@ -142,6 +149,8 @@ const DEFAULT_SETTINGS = {
   adDetectionThreshold: 55,
   epubLightTheme: 'light' as EpubReaderTheme,
   epubDarkTheme: 'dark' as EpubReaderTheme,
+  articleLightTheme: 'light' as EpubReaderTheme,
+  articleDarkTheme: 'dark' as EpubReaderTheme,
   audioCategoryId: null as number | null,
   videoCategoryId: null as number | null,
   magazinesCategoryId: null as number | null,
@@ -185,6 +194,8 @@ export const useSettingsStore = create<SettingsState>()(
       setAdDetectionThreshold: (threshold) => set({ adDetectionThreshold: Math.min(100, Math.max(0, threshold)) }),
       setEpubLightTheme: (theme) => set({ epubLightTheme: theme }),
       setEpubDarkTheme: (theme) => set({ epubDarkTheme: theme }),
+      setArticleLightTheme: (theme) => set({ articleLightTheme: theme }),
+      setArticleDarkTheme: (theme) => set({ articleDarkTheme: theme }),
       setAudioCategoryId: (id) => set({ audioCategoryId: id }),
       setVideoCategoryId: (id) => set({ videoCategoryId: id }),
       setMagazinesCategoryId: (id) => set({ magazinesCategoryId: id }),

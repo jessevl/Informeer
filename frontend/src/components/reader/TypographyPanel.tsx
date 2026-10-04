@@ -41,6 +41,12 @@ interface TypographyPanelProps {
   leadingContent?: ReactNode;
   /** 'sheet' docks to the right edge below the toolbar; 'popover' floats as a rounded card. */
   variant?: 'sheet' | 'popover';
+  /**
+   * Popover height cap. Defaults to the viewport, which suits a full-screen
+   * reader; pass a container-relative value when the reader is itself boxed
+   * (e.g. the article modal) so the panel scrolls instead of being clipped.
+   */
+  popoverMaxHeight?: string;
 }
 
 export function TypographyPanel({
@@ -62,6 +68,7 @@ export function TypographyPanel({
   footerContent,
   leadingContent,
   variant = 'sheet',
+  popoverMaxHeight,
 }: TypographyPanelProps) {
   const isPopover = variant === 'popover';
   const update = (partial: Partial<TypographySettings>) => {
@@ -106,7 +113,7 @@ export function TypographyPanel({
         className,
       )}
       style={isPopover
-        ? { top: topOffset, maxHeight: `calc(100dvh - ${topOffset} - 1rem)` }
+        ? { top: topOffset, maxHeight: popoverMaxHeight ?? `calc(100dvh - ${topOffset} - 1rem)` }
         : { top: topOffset }}
     >
       {/* Header */}
