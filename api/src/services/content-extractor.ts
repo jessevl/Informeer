@@ -72,6 +72,9 @@ const PREDEFINED_RULES: Record<string, string> = {
   'swordscomic.com':      'img#comic-image, div#info-frame.tab-content-area',
   'techcrunch.com':       'div.entry-content',
   'theoatmeal.com':       'div#comic',
+  // The Atlantic's Next.js rewrite uses hashed CSS-module class names that
+  // rotate on every deploy; the data-flatplan-* attributes are stable.
+  'theatlantic.com':      'section[data-flatplan-body]',
   'theregister.com':      '#top-col-story h2, #body',
   // Wired (Condé Nast) uses CSS-in-JS randomised class names that rotate on deploy;
   // data-testid attributes are stable. BodyWrapper targets the actual article prose.

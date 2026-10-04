@@ -5,6 +5,70 @@ import { sanitizeHtml, resolveRelativeUrls, extractFirstImage, resolveLazyImages
 import { throttledFetch, feedFetchHeaders } from '../lib/http.ts';
 
 /**
+ * Convert a parsed XML node into an HTML string.
+ *
+ * Handles the shapes fast-xml-parser produces with `ignoreAttributes: false`:
+ * a plain string, a `{ '#text': ... }` object carrying attributes, CDATA, or a
+ * repeated element (array). Atom `type="text"` content is escaped so stray
+ * angle brackets don't become markup, and `type="xhtml"` (parsed into nested
+ * nodes rather than a string) is skipped.
+ */
+function nodeToHtml(node: unknown): string {
+  if (!node) return '';
+
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const html = nodeToHtml(child);
+      if (html) return html;
+    }
+    return '';
+  }
+
+  if (typeof node === 'string') return node.trim();
+  if (typeof node !== 'object') return '';
+
+  const obj = node as Record<string, unknown>;
+
+  // <content src="..."/> — the body lives elsewhere, nothing inline to use
+  if (obj['@_src']) return '';
+
+  const text = obj['#text'] ?? obj['_cdata'] ?? obj['__cdata'];
+  // Non-string means type="xhtml": nested element nodes, not usable as HTML
+  if (typeof text !== 'string') return '';
+
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+
+  const type = String(obj['@_type'] || '').toLowerCase();
+  if (type === 'text' || type === 'text/plain') {
+    return trimmed
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  return trimmed;
+}
+
+/**
+ * Pull the richest HTML body out of a raw feed entry.
+ *
+ * feed-extractor's normalized `description` is useless as article content: it
+ * runs every candidate through stripTags(), so it only ever yields plain text,
+ * and for Atom it prefers <summary> (a one-line teaser) over <content> (the
+ * full article). Feeds that syndicate full text — The Atlantic's "Best of"
+ * feed, for one — therefore lost the entire article body, leaving the crawler
+ * as the only way to get it.
+ *
+ * Priority matches what other readers do: RSS <content:encoded>, then Atom
+ * <content>, then <description>, then Atom <summary>.
+ */
+function extractFeedHtml(entry: Record<string, unknown>): string {
+  for (const key of ['content:encoded', 'content', 'description', 'summary']) {
+    const html = nodeToHtml(entry[key]);
+    if (html) return html;
+  }
+  return '';
+}
+
+/**
  * RSSSource — fetches and parses RSS/Atom/JSON Feed URLs.
  * Supports conditional GET via ETag and If-Modified-Since headers.
  * Uses throttled fetch to respect per-domain rate limits.
@@ -86,6 +150,7 @@ export class RSSSource implements ContentSource {
         }
 
         return {
+          _contentHtml: extractFeedHtml(feedEntry),
           _enclosures: enclosures,
           _commentsUrl: feedEntry.comments || feedEntry['slash:comments'] || '',
           _thumbnail: feedEntry['media:thumbnail']?.['@_url']
@@ -106,7 +171,11 @@ export class RSSSource implements ContentSource {
     for (const item of parsed.entries) {
       const url = item.link || '';
       const title = item.title || 'Untitled';
-      let content = (item as any).description || item.description || '';
+      // Prefer the feed's own markup — it holds the full article whenever the
+      // publisher syndicates one. feed-extractor's `description` is only a
+      // tag-stripped fallback for feeds that provide nothing richer.
+      const plainDescription = (item as any).description || '';
+      let content = (item as any)._contentHtml || plainDescription;
 
       // Sanitize and resolve relative URLs
       if (content) {
@@ -115,8 +184,10 @@ export class RSSSource implements ContentSource {
         content = resolveRelativeUrls(content, baseUrl);
       }
 
-      // Generate dedup hash from URL + title (or content if no URL)
-      const hashInput = url || `${title}:${content}`;
+      // Generate dedup hash from URL + title (or the description if no URL).
+      // Hash the plain-text description rather than `content`, so hashes stay
+      // stable now that `content` carries the feed's original markup.
+      const hashInput = url || `${title}:${plainDescription}`;
       const hash = contentHash(hashInput);
 
       const publishedAt = item.published

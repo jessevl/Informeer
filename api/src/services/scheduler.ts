@@ -9,6 +9,7 @@ import { RSSSource } from '../sources/rss.ts';
 import { NRCSource } from '../sources/nrc.ts';
 import { MagazineLibSource } from '../sources/magazinelib.ts';
 import { log } from '../lib/logger.ts';
+import { hasFullArticleText } from '../lib/html.ts';
 
 /**
  * Scheduler — unified polling loop for all content sources.
@@ -214,8 +215,8 @@ async function crawlUnfetchedEntries(feed: Feed): Promise<void> {
   const maxContentKb = getSetting<number>('crawler.max_content_length_kb') ?? 512;
 
   const entries = db.query(
-    "SELECT id, url FROM entries WHERE feed_id = ? AND content_fetched = 0 AND url != '' ORDER BY published_at DESC LIMIT 20"
-  ).all(feed.id) as Array<{ id: number; url: string }>;
+    "SELECT id, url, content FROM entries WHERE feed_id = ? AND content_fetched = 0 AND url != '' ORDER BY published_at DESC LIMIT 20"
+  ).all(feed.id) as Array<{ id: number; url: string; content: string }>;
 
   if (entries.length === 0) return;
 
@@ -252,8 +253,17 @@ async function crawlUnfetchedEntries(feed: Feed): Promise<void> {
           "UPDATE entries SET content = ?, reading_time = ?, content_fetched = 1, image_url = CASE WHEN image_url = '' THEN ? ELSE image_url END, changed_at = datetime('now') WHERE id = ?",
           [contentToStore, readingTime, extracted.imageUrl || '', entry.id]
         );
+      } else if (hasFullArticleText(entry.content)) {
+        // The scrape got us nothing (paywall, bot block, unparseable page) but
+        // the feed already syndicated the whole article. Mark it fetched so
+        // opening the entry doesn't retry the same doomed request every time.
+        db.run('UPDATE entries SET content_fetched = 1 WHERE id = ?', [entry.id]);
+        log.debug('Crawler: keeping full content from feed', { entry_id: entry.id });
       }
     } catch (err: any) {
+      if (hasFullArticleText(entry.content)) {
+        db.run('UPDATE entries SET content_fetched = 1 WHERE id = ?', [entry.id]);
+      }
       log.debug('Crawler: failed to fetch content', {
         entry_id: entry.id,
         url: entry.url,
@@ -306,16 +316,20 @@ export function upsertEntries(feed: Feed, entries: NewEntry[]): number {
   const hashes = capped.map(e => e.hash);
   const placeholders = hashes.map(() => '?').join(',');
   const existingRows = db.query(
-    `SELECT hash FROM entries WHERE feed_id = ? AND hash IN (${placeholders})`
-  ).all(feed.id, ...hashes) as Array<{ hash: string }>;
+    `SELECT id, hash, content, content_fetched FROM entries WHERE feed_id = ? AND hash IN (${placeholders})`
+  ).all(feed.id, ...hashes) as Array<{ id: number; hash: string; content: string; content_fetched: number }>;
   const existingHashes = new Set(existingRows.map(r => r.hash));
+  const existingByHash = new Map(existingRows.map(r => [r.hash, r]));
 
   const getLastId = db.prepare('SELECT last_insert_rowid() as id');
 
   db.transaction(() => {
     for (const entry of capped) {
       // Skip duplicates (already checked in batch)
-      if (existingHashes.has(entry.hash)) continue;
+      if (existingHashes.has(entry.hash)) {
+        upgradeTeaserToFullText(existingByHash.get(entry.hash), entry, wpm);
+        continue;
+      }
 
       // Calculate reading time
       const readingTime = estimateReadingTime(entry.content, wpm);
@@ -353,6 +367,36 @@ export function upsertEntries(feed: Feed, entries: NewEntry[]): number {
   })();
 
   return inserted;
+}
+
+/**
+ * Replace a stored teaser with the full article when the feed now carries one.
+ *
+ * Feeds normally only ever hand us an entry once, so a stored body is never
+ * revisited. That leaves two cases stuck on a summary: publishers that push a
+ * teaser first and fill in the full text later, and entries that predate our
+ * reading the feed's own <content>/<content:encoded> element at all.
+ *
+ * Only ever upgrades teaser → full article, and never touches an entry the
+ * crawler has already extracted (content_fetched = 1), so a scraped body is
+ * never downgraded to whatever the feed happens to carry.
+ */
+function upgradeTeaserToFullText(
+  existing: { id: number; content: string; content_fetched: number } | undefined,
+  entry: NewEntry,
+  wpm: number,
+): void {
+  if (!existing || existing.content_fetched) return;
+  if (hasFullArticleText(existing.content) || !hasFullArticleText(entry.content)) return;
+
+  getDb().run(
+    `UPDATE entries SET content = ?, reading_time = ?,
+       image_url = CASE WHEN image_url = '' THEN ? ELSE image_url END,
+       changed_at = datetime('now')
+     WHERE id = ?`,
+    [entry.content, estimateReadingTime(entry.content, wpm), entry.image_url || '', existing.id]
+  );
+  log.debug('Upgraded stored teaser to full feed content', { entry_id: existing.id });
 }
 
 /**

@@ -155,3 +155,71 @@ describe('upsertEntries', () => {
     expect(enclosures).toHaveLength(2);
   });
 });
+
+// Feeds hand us an entry once, so a stored body is otherwise never revisited.
+// These cover repairing entries left holding a summary — e.g. The Atlantic,
+// whose feed carries the whole article in Atom <content>.
+describe('upsertEntries teaser upgrade', () => {
+  const FULL = `<p>${'word '.repeat(600)}</p>`;
+  const TEASER = '<p>A one-line teaser.</p>';
+
+  beforeAll(async () => {
+    await setupTestDb();
+    getTestDb().run(`
+      INSERT INTO feeds (id, user_id, category_id, title, feed_url, source_type)
+      VALUES (1, 1, 1, 'Test Feed', 'https://example.com/feed.xml', 'rss')
+    `);
+  });
+
+  afterAll(teardownTestDb);
+
+  function makeEntry(hash: string, content: string): NewEntry {
+    return {
+      hash,
+      title: 'Entry',
+      url: `https://example.com/${hash}`,
+      author: '',
+      content,
+      published_at: '2026-03-14T10:00:00Z',
+      enclosures: [],
+    };
+  }
+
+  function storedContent(hash: string): string {
+    return (getTestDb().query('SELECT content FROM entries WHERE hash = ?').get(hash) as { content: string }).content;
+  }
+
+  test('replaces a stored teaser with the feed\'s full article', () => {
+    const feed = makeFeed();
+    expect(upsertEntries(feed, [makeEntry('upgrade-1', TEASER)])).toBe(1);
+    expect(storedContent('upgrade-1')).toBe(TEASER);
+
+    // Re-syncing the same entry, now with full text, counts as no new entry
+    expect(upsertEntries(feed, [makeEntry('upgrade-1', FULL)])).toBe(0);
+    expect(storedContent('upgrade-1')).toBe(FULL);
+  });
+
+  test('recalculates reading time for the upgraded body', () => {
+    const feed = makeFeed();
+    upsertEntries(feed, [makeEntry('upgrade-2', TEASER)]);
+    upsertEntries(feed, [makeEntry('upgrade-2', FULL)]);
+    const row = getTestDb().query('SELECT reading_time FROM entries WHERE hash = ?')
+      .get('upgrade-2') as { reading_time: number };
+    expect(row.reading_time).toBeGreaterThan(1);
+  });
+
+  test('never downgrades a full article back to a teaser', () => {
+    const feed = makeFeed();
+    upsertEntries(feed, [makeEntry('upgrade-3', FULL)]);
+    upsertEntries(feed, [makeEntry('upgrade-3', TEASER)]);
+    expect(storedContent('upgrade-3')).toBe(FULL);
+  });
+
+  test('leaves crawler-extracted content alone', () => {
+    const feed = makeFeed();
+    upsertEntries(feed, [makeEntry('upgrade-4', TEASER)]);
+    getTestDb().run("UPDATE entries SET content_fetched = 1 WHERE hash = 'upgrade-4'");
+    upsertEntries(feed, [makeEntry('upgrade-4', FULL)]);
+    expect(storedContent('upgrade-4')).toBe(TEASER);
+  });
+});

@@ -5,6 +5,7 @@ import { queryEntries, formatEntry } from './categories.ts';
 import { extractContent } from '../services/content-extractor.ts';
 import { estimateReadingTime } from '../services/reading-time.ts';
 import { log } from '../lib/logger.ts';
+import { hasFullArticleText } from '../lib/html.ts';
 import { badRequest, notFound } from '../lib/errors.ts';
 
 const entries = new Hono<{ Variables: { user: AuthUser } }>();
@@ -166,6 +167,12 @@ entries.get('/v1/entries/:id/fetch-content', async (c) => {
         row.content = extracted.content;
         row.reading_time = readingTime;
         log.debug('Content extracted', { entry_id: id, content_length: extracted.content.length });
+      } else if (hasFullArticleText(row.content)) {
+        // Extraction failed but the feed already gave us the whole article.
+        // Mark it fetched so we stop re-attempting a blocked or unparseable
+        // page every time the entry is opened.
+        db.run('UPDATE entries SET content_fetched = 1 WHERE id = ?', [id]);
+        log.debug('Keeping full content from feed', { entry_id: id, url: row.url });
       } else {
         log.warn('Content extraction returned no content (Readability could not parse page)', { entry_id: id, url: row.url });
       }

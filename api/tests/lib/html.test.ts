@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { sanitizeHtml, resolveRelativeUrls, extractFirstImage, resolveLazyImages } from '../../src/lib/html.ts';
+import { sanitizeHtml, resolveRelativeUrls, extractFirstImage, resolveLazyImages, hasFullArticleText } from '../../src/lib/html.ts';
 
 describe('sanitizeHtml', () => {
   test('removes script tags', () => {
@@ -134,5 +134,59 @@ describe('resolveLazyImages', () => {
     const html = '<img src="" data-src="https://example.com/lazy.jpg" />';
     const result = resolveLazyImages(html);
     expect(result).toContain('src="https://example.com/lazy.jpg"');
+  });
+});
+
+// Feed bodies are publisher-supplied HTML that the reader renders directly,
+// so script-bearing URLs must not survive sanitizing.
+describe('sanitizeHtml script URLs', () => {
+  test('neutralizes javascript: hrefs', () => {
+    expect(sanitizeHtml('<a href="javascript:alert(1)">x</a>')).toBe('<a href="#">x</a>');
+  });
+
+  test('neutralizes padded and mixed-case javascript: hrefs', () => {
+    expect(sanitizeHtml('<a href=" JavaScript : alert(1)">x</a>')).toBe('<a href="#">x</a>');
+  });
+
+  test('neutralizes vbscript: hrefs, preserving the quote style', () => {
+    expect(sanitizeHtml("<a href='vbscript:msgbox'>x</a>")).toBe("<a href='#'>x</a>");
+  });
+
+  test('neutralizes data: documents', () => {
+    expect(sanitizeHtml('<a href="data:text/html;base64,PHN2Zz4=">x</a>')).toBe('<a href="#">x</a>');
+  });
+
+  test('neutralizes xlink:href on SVG', () => {
+    expect(sanitizeHtml('<use xlink:href="javascript:alert(1)"/>')).toBe('<use xlink:href="#"/>');
+  });
+
+  test('keeps data:image/ sources', () => {
+    const html = '<img src="data:image/png;base64,iVBORw0KGgo=">';
+    expect(sanitizeHtml(html)).toBe(html);
+  });
+
+  test('keeps ordinary and relative URLs untouched', () => {
+    const html = '<a href="https://example.com/a?b=1&c=2">x</a><img src="/img/photo.jpg">';
+    expect(sanitizeHtml(html)).toBe(html);
+  });
+});
+
+describe('hasFullArticleText', () => {
+  test('is false for empty or missing content', () => {
+    expect(hasFullArticleText('')).toBe(false);
+    expect(hasFullArticleText(null)).toBe(false);
+    expect(hasFullArticleText(undefined)).toBe(false);
+  });
+
+  test('is false for a feed teaser', () => {
+    expect(hasFullArticleText('<p>A one-line teaser about the article.</p>')).toBe(false);
+  });
+
+  test('is false for markup with no text', () => {
+    expect(hasFullArticleText('<div>'.repeat(500))).toBe(false);
+  });
+
+  test('is true for a full article body', () => {
+    expect(hasFullArticleText(`<p>${'word '.repeat(600)}</p>`)).toBe(true);
   });
 });

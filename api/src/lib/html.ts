@@ -5,12 +5,43 @@ const AD_TRACKING_DOMAINS = /(?:^|\/)(?:(?:ads?|pixel|tracker|analytics|beacon|s
 
 const SOCIAL_ICON_PATTERNS = /(?:\/(?:share|social|follow|like|tweet|fb|facebook|twitter|linkedin|pinterest|whatsapp|telegram|email|rss)[-_]?(?:icon|button|badge|logo|count|btn|widget)|\/(?:flattr|paypal|patreon)[-_]?(?:icon|button|badge)|(?:feedburner|feedblitz)(?:\/|-)|(?:facebook|twitter|x-twitter|linkedin|pinterest|whatsapp|telegram|reddit|email|rss|mastodon)[-_](?:icon|logo|button|badge|share|btn)\.\w{3,4}(?:\?|$)|\/(?:facebook|twitter|linkedin|pinterest|whatsapp|telegram|reddit|email|rss|mastodon|x-twitter)\.\w{3,4}(?:\?|$))/i;
 
+/**
+ * Minimum body text (characters) for stored content to count as a complete
+ * article rather than a teaser. ~1 500 chars is roughly 250 words — longer
+ * than any feed summary, shorter than any real article.
+ */
+const FULL_ARTICLE_MIN_CHARS = 1500;
+
+/**
+ * Does this HTML already hold a full article rather than a summary?
+ *
+ * Used to decide whether a failed scrape is worth retrying: publishers that
+ * syndicate full text (e.g. The Atlantic) give us better content in the feed
+ * than a scrape can — and often better than one we are allowed to fetch at
+ * all, once a CDN starts blocking us.
+ */
+export function hasFullArticleText(html: string | null | undefined): boolean {
+  if (!html) return false;
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.length >= FULL_ARTICLE_MIN_CHARS;
+}
+
 /** Strip <script> tags and event handler attributes from HTML */
 export function sanitizeHtml(html: string): string {
   // Remove <script> tags and their content
   let clean = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
   // Remove event handler attributes (onclick, onerror, etc.)
   clean = clean.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  // Neutralize script-bearing URLs. Feed bodies are publisher-supplied HTML
+  // that we render directly, so a javascript: or data:text/html href must
+  // never survive into the reader. data:image/ URIs are left alone.
+  clean = clean.replace(
+    /((?:href|src|xlink:href)\s*=\s*)(["'])\s*(javascript|vbscript|data)\s*:([^"']*)\2/gi,
+    (match, attr, quote, scheme, rest) =>
+      scheme.toLowerCase() === 'data' && /^image\//i.test(rest.trim())
+        ? match
+        : `${attr}${quote}#${quote}`,
+  );
   return clean;
 }
 
