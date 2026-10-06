@@ -60,6 +60,7 @@ import { useConnectivityStore } from '@/stores/connectivity';
 import { EPUB_FONT_FACE_CSS, getEpubFontStack, normalizeEpubFontValue } from '@/lib/epub-fonts';
 import { deleteCachedEpubLocations, readCachedEpubLocations, writeCachedEpubLocations } from '@/lib/epub-locations-cache';
 import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
+import { useIsViewportAtLeast } from '@/hooks/useIsViewportAtLeast';
 import { useOverlayCloseInteraction } from '@/hooks/useOverlayCloseInteraction';
 import { einkPower } from '@/services/eink-power';
 
@@ -117,6 +118,12 @@ const EPUB_LOCATION_BREAK_CHARS = 1600;
 // A relocation within this window after a user navigation (page turn, TOC,
 // seek, link) is attributed to that navigation and may move the anchor.
 const EPUB_USER_NAV_WINDOW_MS = 3000;
+// A spread halves the viewer, so each page has to stay readable: below roughly
+// 260px a book column becomes a ribbon. Set above any folded phone cover screen
+// (~430px) and well below an unfolded inner display (~830px), so a foldable
+// crosses it exactly when it opens. Deliberately wider than the article
+// reader's 440px gate — article columns tolerate being narrower than book pages.
+const EPUB_MIN_SPREAD_VIEWPORT_PX = 560;
 // Debounce for re-checking the anchor after late reflows (fonts, images).
 const EPUB_ANCHOR_CHECK_DELAY_MS = 250;
 
@@ -332,6 +339,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   }, [showControls]);
 
   // --- Spread mode ---
+  // The spread the reader has asked for, which outlives a fold.
   const [isSpreadView, setIsSpreadView] = useState(false);
 
   // --- TOC ---
@@ -357,10 +365,20 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   // activate the restore guard every time the toolbar auto-hides — silently
   // discarding page-turn progress for the duration of every guard window.
   const isLandscapeViewport = isWindowLandscapeViewport;
+  /**
+   * Whether a spread fits at all, independent of whether one is wanted.
+   *
+   * minSpreadWidth is pinned to 1 to defeat epubjs's own 800px guard, so this
+   * is the only thing standing between a narrow screen and a two-column
+   * layout. Orientation cannot do the job: a book-style foldable is taller
+   * than it is wide both folded and unfolded, so it reads as portrait in
+   * either state and a spread chosen while unfolded survived the fold.
+   */
+  const spreadFitsViewport = useIsViewportAtLeast(EPUB_MIN_SPREAD_VIEWPORT_PX);
   // Auto-spread should follow orientation so rotating between portrait and
   // landscape flips between single-page and spread layouts without needing the
   // typography panel.
-  const isSpreadEligible = isLandscapeViewport;
+  const isSpreadEligible = isLandscapeViewport && spreadFitsViewport;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(
@@ -1312,7 +1330,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         // Determine initial spread based on viewport
         const viewerEl = viewerRef.current!;
 
-        const wantSpread = manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible;
+        // isSpreadView may not have caught up with the auto decision on the
+        // first render, so fall back to eligibility until it has.
+        const wantSpread = (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible)
+          && spreadFitsViewport;
         const rendition = epub.renderTo(viewerEl, {
           width: '100%',
           height: '100%',
@@ -1882,14 +1903,18 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   }, [applyDerivedPagePosition, book.id, finishEinkWork, startEinkWork]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === Update spread mode ===
+  // Keyed on the effective spread, so folding to a narrow screen re-lays the
+  // book out in one column and unfolding restores the two the reader asked for,
+  // without either touching the stored preference.
+  const effectiveSpreadView = isSpreadView && spreadFitsViewport;
   useEffect(() => {
     if (renditionRef.current) {
       startEinkWork('spread');
       // Second arg overrides minSpreadWidth so the 800 px guard is bypassed.
-      (renditionRef.current as any).spread(isSpreadView ? 'always' : 'none', isSpreadView ? 1 : 800);
+      (renditionRef.current as any).spread(effectiveSpreadView ? 'always' : 'none', effectiveSpreadView ? 1 : 800);
       queueRestoreToCfi(undefined, 'spread-change');
     }
-  }, [isSpreadView, queueRestoreToCfi, startEinkWork]);
+  }, [effectiveSpreadView, queueRestoreToCfi, startEinkWork]);
 
   // === Update theme/typography when settings change ===
   useEffect(() => {
@@ -2239,7 +2264,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
             )}
             showReadingModeControl={false}
             alwaysShowColumns={true}
-            maxPaginatedColumns={2}
+            maxPaginatedColumns={spreadFitsViewport ? 2 : 1}
+            paginatedColumnHint={'This screen is too narrow for two columns.'}
             footerContent={(
               <div className="p-3 rounded-lg bg-[var(--color-surface-tertiary)]/55 border border-[var(--color-border-subtle)] text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
                 <div className="font-medium text-[var(--color-text-secondary)]">Page Number Source</div>
