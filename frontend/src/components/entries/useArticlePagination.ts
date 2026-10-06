@@ -6,6 +6,7 @@
 
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react';
 import { einkPower } from '@/services/eink-power';
+import { isSwipeFlick } from '@/components/reader/swipe-follow';
 
 const ARTICLE_PAGE_GAP_PX = 40;
 const RECOMMENDED_TWO_COLUMN_PAGE_WIDTH_PX = 200;
@@ -422,23 +423,14 @@ export function useArticlePagination({
     pageTurnAnimationFrameRef.current = requestAnimationFrame(step);
   }, []);
 
-  const scrollByPage = useCallback((direction: 1 | -1) => {
-    const scroller = scrollRef.current;
-    if (!scroller || isPaginatedTransitioningRef.current) return;
-
-    const {
-      step,
-      totalPages,
-      getPageLeft,
-      trailingBlankColumns: nextBlankColumns,
-      targetScrollWidth: nextWidth
-    } = getPageMetrics(scroller);
-    syncTrailingSpace(nextBlankColumns, nextWidth);
-    const currentPage = Math.max(0, Math.min(totalPages - 1, Math.round(scroller.scrollLeft / step)));
-    const targetPage = Math.max(0, Math.min(totalPages - 1, currentPage + direction));
-    const targetLeft = getPageLeft(targetPage);
-
+  /**
+   * Animate the scroller to an exact offset, running the full e-ink page-turn
+   * lifecycle around it. Shared by discrete page turns and the release of a
+   * follow-the-finger drag, which both just need to land on a page boundary.
+   */
+  const settleToScrollLeft = useCallback((scroller: HTMLElement, targetLeft: number) => {
     if (Math.abs(targetLeft - scroller.scrollLeft) < 2) {
+      scroller.scrollLeft = targetLeft;
       requestAnimationFrame(updatePageNavState);
       if (einkMode) {
         // Re-signal hibernation: Java's handleKeyEvent active path dispatches the wake command
@@ -481,7 +473,112 @@ export function useArticlePagination({
       return;
     }
     animatePaginatedScrollTo(scroller, targetLeft, finalizeTurn);
-  }, [animatePaginatedScrollTo, cancelPaginatedReady, clearPaginatedWorkFallback, einkMode, finishEinkWork, getPageMetrics, schedulePaginatedReady, scrollRef, startEinkWork, syncTrailingSpace, updatePageNavState]);
+  }, [animatePaginatedScrollTo, cancelPaginatedReady, clearPaginatedWorkFallback, einkMode, finishEinkWork, schedulePaginatedReady, startEinkWork, updatePageNavState]);
+
+  const scrollByPage = useCallback((direction: 1 | -1) => {
+    const scroller = scrollRef.current;
+    if (!scroller || isPaginatedTransitioningRef.current) return;
+
+    const {
+      step,
+      totalPages,
+      getPageLeft,
+      trailingBlankColumns: nextBlankColumns,
+      targetScrollWidth: nextWidth
+    } = getPageMetrics(scroller);
+    syncTrailingSpace(nextBlankColumns, nextWidth);
+    const currentPage = Math.max(0, Math.min(totalPages - 1, Math.round(scroller.scrollLeft / step)));
+    const targetPage = Math.max(0, Math.min(totalPages - 1, currentPage + direction));
+    settleToScrollLeft(scroller, getPageLeft(targetPage));
+  }, [getPageMetrics, scrollRef, settleToScrollLeft, syncTrailingSpace]);
+
+  // ─── Follow-the-finger drag ───────────────────────────────────
+  // Pagination is driven by scrollLeft, so a drag can move the real content
+  // under the pointer 1:1 and release onto the nearest page boundary. Nothing
+  // commits mid-gesture.
+  const dragRef = useRef<{
+    startLeft: number;
+    step: number;
+    totalPages: number;
+    maxLeft: number;
+    getPageLeft: (pageIndex: number) => number;
+  } | null>(null);
+
+  /**
+   * Take over the scroller for a live drag. Returns false when dragging is not
+   * available — on E-ink, which cannot repaint fast enough to track a pointer,
+   * and on single-page articles — so callers can fall back to a discrete turn.
+   */
+  const beginPageDrag = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || einkMode || isPaginatedTransitioningRef.current) return false;
+
+    const {
+      step,
+      totalPages,
+      getPageLeft,
+      lastPageLeft,
+      trailingBlankColumns: nextBlankColumns,
+      targetScrollWidth: nextWidth
+    } = getPageMetrics(scroller);
+    syncTrailingSpace(nextBlankColumns, nextWidth);
+    if (totalPages <= 1 || step <= 0) return false;
+
+    // Start from where the page actually is, not where an in-flight animation
+    // was heading, so grabbing a moving page does not jump.
+    if (pageTurnAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(pageTurnAnimationFrameRef.current);
+      pageTurnAnimationFrameRef.current = null;
+    }
+    cancelPaginatedReady();
+
+    dragRef.current = {
+      startLeft: scroller.scrollLeft,
+      step,
+      totalPages,
+      maxLeft: lastPageLeft,
+      getPageLeft,
+    };
+    return true;
+  }, [cancelPaginatedReady, einkMode, getPageMetrics, scrollRef, syncTrailingSpace]);
+
+  /** Track the pointer. `dx` is the gesture's total horizontal travel. */
+  const movePageDrag = useCallback((dx: number) => {
+    const scroller = scrollRef.current;
+    const drag = dragRef.current;
+    if (!scroller || !drag) return;
+    // Dragging left (negative dx) pulls the next page in from the right.
+    scroller.scrollLeft = Math.max(0, Math.min(drag.maxLeft, drag.startLeft - dx));
+  }, [scrollRef]);
+
+  /** Release the drag and settle onto a page. */
+  const endPageDrag = useCallback((dx: number, durationMs: number) => {
+    const scroller = scrollRef.current;
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!scroller || !drag) return;
+
+    // A flick advances one page from where the drag started, however far it got.
+    // Otherwise the page the content is now nearest wins, so dragging past
+    // halfway turns and anything short of that falls back.
+    const startPage = Math.round(drag.startLeft / drag.step);
+    const targetPage = isSwipeFlick(dx, durationMs)
+      ? startPage + (dx < 0 ? 1 : -1)
+      : Math.round(scroller.scrollLeft / drag.step);
+
+    const clampedPage = Math.max(0, Math.min(drag.totalPages - 1, targetPage));
+    settleToScrollLeft(scroller, Math.min(drag.getPageLeft(clampedPage), drag.maxLeft));
+  }, [scrollRef, settleToScrollLeft]);
+
+  /** Abandon a drag (touch cancelled) and return to the page it started on. */
+  const cancelPageDrag = useCallback(() => {
+    const scroller = scrollRef.current;
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!scroller || !drag) return;
+    const startPage = Math.max(0, Math.min(drag.totalPages - 1, Math.round(drag.startLeft / drag.step)));
+    settleToScrollLeft(scroller, Math.min(drag.getPageLeft(startPage), drag.maxLeft));
+  }, [scrollRef, settleToScrollLeft]);
 
   const handlePrevPage = useCallback(() => scrollByPage(-1), [scrollByPage]);
   const handleNextPage = useCallback(() => scrollByPage(1), [scrollByPage]);
@@ -506,6 +603,10 @@ export function useArticlePagination({
     cancelPaginatedReady,
     handlePrevPage,
     handleNextPage,
+    beginPageDrag,
+    movePageDrag,
+    endPageDrag,
+    cancelPageDrag,
     paginatedArticleStyle,
     schedulePaginatedReady,
     trailingBlankColumns,

@@ -42,6 +42,14 @@ import {
 } from '@/components/reader';
 import { useEinkWorkTag, useReaderWakeHandlers } from '@/components/reader/useEinkReaderLifecycle';
 import { getTapZoneAction } from '@/components/reader/tap-zones';
+import {
+  SWIPE_FOLLOW_EDGE_DAMPING,
+  SWIPE_SETTLE_MS,
+  WHEEL_GESTURE_END_MS,
+  isHorizontalSwipe,
+  shouldCommitFollowSwipe,
+  shouldCommitSwipe,
+} from '@/components/reader/swipe-follow';
 import { useRemoteProgressSync } from '@/hooks/useRemoteProgressSync';
 import { TypographyPanel, DEFAULT_TYPOGRAPHY } from '@/components/reader/TypographyPanel';
 import { ReaderColorSchemePicker } from '@/components/reader/ReaderColorSchemePicker';
@@ -59,6 +67,17 @@ applyEpubjsPatches();
 
 type ReaderTheme = EpubReaderTheme;
 type PageNumberMode = 'source' | 'synthetic' | 'percent';
+// A released drag carries the page the rest of the way off, then the new page
+// slides in behind it. Kept brisk — this plays after the finger has already
+// left the screen.
+const PAGE_DRAG_EXIT_MS = 170;
+// Floor for the shortened exit, so the swap never reads as a hard cut.
+const PAGE_DRAG_EXIT_MIN_MS = 80;
+const PAGE_DRAG_ENTER_MS = 170;
+// Longest wait for the rendition to report the new page before the reader
+// gives up and puts the page back, rather than leaving it parked off-screen.
+const PAGE_DRAG_TURN_TIMEOUT_MS = 700;
+
 const APP_THEME_ORDER = ['light', 'system', 'dark'] as const;
 
 interface EPUBReaderProps {
@@ -734,6 +753,237 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   readerThemeRef.current = readerTheme;
   const typographyRef = useRef(typography);
   typographyRef.current = typography;
+  const einkModeRef = useRef(einkMode);
+  einkModeRef.current = einkMode;
+  const canGoNextRef = useRef(canGoNext);
+  canGoNextRef.current = canGoNext;
+  const canGoPrevRef = useRef(canGoPrev);
+  canGoPrevRef.current = canGoPrev;
+
+  // ─── Follow-the-finger page drag ───────────────────────────────
+  // The epub renders in an iframe we cannot slice into page halves, so a drag
+  // translates the whole page surface. Writes go straight to the DOM rather
+  // than through state: a swipe produces a touchmove per frame, and this
+  // component is far too heavy to re-render at that rate.
+  const pageSurfaceRef = useRef<HTMLDivElement>(null);
+  const pageDragSettleTimerRef = useRef<number | null>(null);
+  const pageDragExitTimerRef = useRef<number | null>(null);
+  const pageDragEnterTimerRef = useRef<number | null>(null);
+  const pageDragTurnTimeoutRef = useRef<number | null>(null);
+  /** Set while the page is held off-screen waiting for the new content. */
+  const pageDragEnterPendingRef = useRef(false);
+  /**
+   * Translation currently applied to the page surface.
+   *
+   * Touch coordinates arrive from inside the epub iframe, so they are measured
+   * against the iframe's own viewport — which this transform moves. Holding a
+   * finger still therefore makes `clientX` drift by exactly `-offset`, and
+   * feeding that back in oscillated the page every frame. Handlers add this
+   * back to recover the finger's true travel. See `stableTouchX`.
+   */
+  const pageDragAppliedRef = useRef(0);
+
+  /**
+   * Move the page surface. Written synchronously from the touch handler, not
+   * batched into a frame callback: a transform-only change is composited, so
+   * deferring buys nothing and costs a frame of lag behind the finger. The
+   * article reader writes its scrollLeft the same way, which is why the two
+   * now track identically.
+   */
+  const writePageDrag = useCallback((offset: number) => {
+    const el = pageSurfaceRef.current;
+    if (!el) return;
+    pageDragAppliedRef.current = offset;
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${offset}px)`;
+  }, []);
+
+  /**
+   * Track the pointer. Returns false when the reader will not drag — on E-ink,
+   * which cannot repaint fast enough to follow a finger, or mid page-turn — so
+   * callers can fall back to a discrete turn.
+   */
+  const setPageDrag = useCallback((dx: number) => {
+    if (einkModeRef.current || isAnimatingRef.current) return false;
+    // A previously released drag is still playing out its turn. Let it finish
+    // rather than measure a new gesture against a surface that is mid-animation
+    // — the offset would move under the gesture, exactly the feedback the
+    // iframe coordinates already have to be corrected for.
+    if (
+      pageDragExitTimerRef.current !== null
+      || pageDragEnterTimerRef.current !== null
+      || pageDragEnterPendingRef.current
+    ) return false;
+    const el = pageSurfaceRef.current;
+    if (!el) return false;
+    // 1:1 with the pointer, so the page stays stuck to the finger exactly as it
+    // does in the article reader. What trails in behind it is the page colour
+    // rather than the next page's text — epubjs renders one page per iframe and
+    // gives us no way to paint the neighbour alongside it — but tracking the
+    // finger matters more than what fills the gutter.
+    // Past the first/last page there is nothing to turn to, so the page resists.
+    const atEdge = (dx > 0 && !canGoPrevRef.current) || (dx < 0 && !canGoNextRef.current);
+    const offset = atEdge ? dx * SWIPE_FOLLOW_EDGE_DAMPING : dx;
+    // Never travel more than one page away. A finger rarely gets that far, but a
+    // trackpad flick's momentum tail keeps accumulating after the fingers lift
+    // and would otherwise sling the page off into blank space before committing.
+    const limit = window.innerWidth;
+    writePageDrag(Math.max(-limit, Math.min(limit, offset)));
+    return true;
+  }, [writePageDrag]);
+
+  /** Strip the live transform, handing the element back to React. */
+  const clearPageDrag = useCallback(() => {
+    if (pageDragSettleTimerRef.current !== null) {
+      clearTimeout(pageDragSettleTimerRef.current);
+      pageDragSettleTimerRef.current = null;
+    }
+    pageDragEnterPendingRef.current = false;
+    pageDragAppliedRef.current = 0;
+    const el = pageSurfaceRef.current;
+    if (!el) return;
+    el.style.transform = '';
+    el.style.transition = '';
+  }, []);
+
+  /** Ease the page back to rest after a drag that did not turn it. */
+  const settlePageDrag = useCallback(() => {
+    const el = pageSurfaceRef.current;
+    if (!el) { clearPageDrag(); return; }
+    pageDragAppliedRef.current = 0;
+    el.style.transition = `transform ${SWIPE_SETTLE_MS}ms ease-out`;
+    el.style.transform = 'translateX(0px)';
+    if (pageDragSettleTimerRef.current !== null) clearTimeout(pageDragSettleTimerRef.current);
+    // Hand the element back to React only once it is at rest — stripping the
+    // inline styles any earlier would cut the animation short.
+    pageDragSettleTimerRef.current = window.setTimeout(() => {
+      pageDragSettleTimerRef.current = null;
+      const current = pageSurfaceRef.current;
+      if (!current) return;
+      current.style.transform = '';
+      current.style.transition = '';
+    }, SWIPE_SETTLE_MS);
+  }, [clearPageDrag]);
+
+  const clearPageDragTimers = useCallback(() => {
+    for (const ref of [pageDragSettleTimerRef, pageDragExitTimerRef, pageDragEnterTimerRef, pageDragTurnTimeoutRef]) {
+      if (ref.current !== null) {
+        clearTimeout(ref.current);
+        ref.current = null;
+      }
+    }
+  }, []);
+
+  /**
+   * Reveal the page once the rendition has painted the content a released
+   * drag turned to, sliding it in from the edge the old page left towards.
+   * Driven from the rendition's own relocated hook, so the page is only
+   * un-parked when there is something new to show.
+   */
+  const enterPageAfterDragTurn = useCallback(() => {
+    if (!pageDragEnterPendingRef.current) return;
+    pageDragEnterPendingRef.current = false;
+    if (pageDragTurnTimeoutRef.current !== null) {
+      clearTimeout(pageDragTurnTimeoutRef.current);
+      pageDragTurnTimeoutRef.current = null;
+    }
+    const el = pageSurfaceRef.current;
+    if (!el) return;
+
+    // The outgoing page left towards one edge, so the new one comes from the
+    // other: start it there with no transition, then animate it home.
+    const from = -pageDragAppliedRef.current;
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${from}px)`;
+    pageDragAppliedRef.current = from;
+
+    requestAnimationFrame(() => {
+      const sliding = pageSurfaceRef.current;
+      if (!sliding) return;
+      sliding.style.transition = `transform ${PAGE_DRAG_ENTER_MS}ms ease-out`;
+      sliding.style.transform = 'translateX(0px)';
+      pageDragAppliedRef.current = 0;
+      pageDragEnterTimerRef.current = window.setTimeout(() => {
+        pageDragEnterTimerRef.current = null;
+        const done = pageSurfaceRef.current;
+        if (!done) return;
+        done.style.transform = '';
+        done.style.transition = '';
+      }, PAGE_DRAG_ENTER_MS);
+    });
+  }, []);
+
+  const enterPageAfterDragTurnRef = useRef(enterPageAfterDragTurn);
+  enterPageAfterDragTurnRef.current = enterPageAfterDragTurn;
+
+  /**
+   * Release a drag that turns the page: carry the page the rest of the way
+   * off from wherever the finger left it, then swap the content and slide the
+   * new page in behind it.
+   *
+   * This runs its own animation and uses the *instant* page turn rather than
+   * animatePageTurn. That animation slides from a fixed -25%, so React would
+   * write that transform over the live one and haul the page backwards to
+   * reach it — and because React applies style properties in key order it
+   * writes the transform before the transition, making even that jump cut
+   * rather than animate.
+   */
+  const releasePageDragWithTurn = useCallback((direction: 1 | -1) => {
+    const el = pageSurfaceRef.current;
+    const canTurn = direction === 1 ? canGoNextRef.current : canGoPrevRef.current;
+    const turn = direction === 1 ? nextPageInstantRef.current : prevPageInstantRef.current;
+
+    // Nothing to turn to, or no surface to animate: just rest the page.
+    if (!el || !canTurn || einkModeRef.current) {
+      if (canTurn) turn();
+      settlePageDrag();
+      return;
+    }
+
+    clearPageDragTimers();
+
+    const width = el.clientWidth || window.innerWidth;
+    const exitTo = direction === 1 ? -width : width;
+    // Time the exit to the distance still to cover, so a page already dragged
+    // most of the way off finishes at once instead of crawling the last few
+    // pixels for as long as a full-width slide.
+    const remaining = Math.abs(exitTo - pageDragAppliedRef.current);
+    const exitMs = Math.max(
+      PAGE_DRAG_EXIT_MIN_MS,
+      Math.round(PAGE_DRAG_EXIT_MS * Math.min(1, remaining / Math.max(width, 1))),
+    );
+
+    el.style.transition = `transform ${exitMs}ms ease-out`;
+    el.style.transform = `translateX(${exitTo}px)`;
+    pageDragAppliedRef.current = exitTo;
+
+    pageDragExitTimerRef.current = window.setTimeout(() => {
+      pageDragExitTimerRef.current = null;
+      // Hold the page off-screen across the swap so the outgoing content
+      // never flashes back through the middle.
+      pageDragEnterPendingRef.current = true;
+      turn();
+      pageDragTurnTimeoutRef.current = window.setTimeout(() => {
+        pageDragTurnTimeoutRef.current = null;
+        if (!pageDragEnterPendingRef.current) return;
+        pageDragEnterPendingRef.current = false;
+        settlePageDrag();
+      }, PAGE_DRAG_TURN_TIMEOUT_MS);
+    }, exitMs);
+  }, [clearPageDragTimers, settlePageDrag]);
+
+  useEffect(() => () => {
+    for (const ref of [pageDragSettleTimerRef, pageDragExitTimerRef, pageDragEnterTimerRef, pageDragTurnTimeoutRef]) {
+      if (ref.current !== null) clearTimeout(ref.current);
+    }
+  }, []);
+
+  const setPageDragRef = useRef(setPageDrag);
+  setPageDragRef.current = setPageDrag;
+  const releasePageDragWithTurnRef = useRef(releasePageDragWithTurn);
+  releasePageDragWithTurnRef.current = releasePageDragWithTurn;
+  const settlePageDragRef = useRef(settlePageDrag);
+  settlePageDragRef.current = settlePageDrag;
 
   // Guard to prevent double-toggle when touch tap fires followed by synthesized click
   const touchTapRef = useRef(false);
@@ -932,6 +1182,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
               triggerPageEnterRef.current();
+              // A released drag parks the page off-screen until this point,
+              // then slides the freshly painted page in.
+              enterPageAfterDragTurnRef.current();
             });
           });
 
@@ -1062,9 +1315,40 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
         // Shared wheel state across all iframes (spread mode has two iframes;
         // separate cooldowns per-iframe would allow double page turns on one swipe).
+        // Accumulated in finger-travel units (negative = towards the next page),
+        // so the touch and trackpad paths share the same commit thresholds.
         let sharedWheelAccX = 0;
+        let sharedWheelStart = 0;
         let sharedWheelTimer: any = null;
         let sharedWheelCooldown = false;
+
+        const resetSharedWheel = () => {
+          sharedWheelAccX = 0;
+          sharedWheelStart = 0;
+        };
+
+        /** (Re)arm the quiet period that stands in for a trackpad release. */
+        const armSharedWheelEnd = (onEnd: () => void) => {
+          if (sharedWheelTimer) clearTimeout(sharedWheelTimer);
+          sharedWheelTimer = setTimeout(() => {
+            sharedWheelTimer = null;
+            onEnd();
+          }, WHEEL_GESTURE_END_MS);
+        };
+
+        /**
+         * Ignore the rest of this gesture. Re-armed on every event, so a
+         * momentum tail is swallowed however long it runs — a fixed cooldown
+         * gets outlasted and lets one flick turn a second page.
+         */
+        const holdSharedWheelUntilQuiet = () => {
+          sharedWheelCooldown = true;
+          resetSharedWheel();
+          armSharedWheelEnd(() => {
+            sharedWheelCooldown = false;
+            resetSharedWheel();
+          });
+        };
 
         rendition.hooks.content.register((contents: Contents) => {
           const doc = (contents as any).document as Document;
@@ -1096,13 +1380,28 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
           let startX = 0, startY = 0, startTime = 0;
           let touchMoved = false;
+          let dragFollowing = false;
+
+          /**
+           * Horizontal position of a touch, with the drag transform cancelled out.
+           *
+           * `clientX` is relative to the iframe viewport, which the drag
+           * transform moves, so a motionless finger appears to slide back by
+           * exactly the offset we just applied — feeding that straight back in
+           * oscillated the page every frame. Adding the offset back returns a
+           * position that does not depend on it. Both the gesture start and
+           * every sample go through here, so a touch landing while the page is
+           * still off-centre measures from the same frame as the rest.
+           */
+          const stableTouchX = (touch: Touch) => touch.clientX + pageDragAppliedRef.current;
 
           doc.addEventListener('touchstart', (e: TouchEvent) => {
             if (e.touches.length === 1) {
-              startX = e.touches[0].clientX;
+              startX = stableTouchX(e.touches[0]);
               startY = e.touches[0].clientY;
               startTime = Date.now();
               touchMoved = false;
+              dragFollowing = false;
             }
           }, { passive: true });
 
@@ -1110,18 +1409,30 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           // hijacking swipes for its own back/forward navigation
           doc.addEventListener('touchmove', (e: TouchEvent) => {
             if (e.touches.length !== 1) return;
-            const dx = Math.abs(e.touches[0].clientX - startX);
-            const dy = Math.abs(e.touches[0].clientY - startY);
-            if (dx > 5 || dy > 5) touchMoved = true;
-            if (dx > dy && dx > 10) {
+            const dx = stableTouchX(e.touches[0]) - startX;
+            const dy = e.touches[0].clientY - startY;
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+            if (absDx > 5 || absDy > 5) touchMoved = true;
+            if (absDx > absDy && absDx > 10) {
               e.preventDefault();
+              // The page follows the finger; nothing commits until release.
+              if (setPageDragRef.current(dx)) dragFollowing = true;
             }
           }, { passive: false });
 
           doc.addEventListener('touchend', (e: TouchEvent) => {
             const touch = e.changedTouches[0];
-            if (!touch) return;
-            const dx = touch.clientX - startX;
+            if (!touch) {
+              // No touch to judge the gesture by, so don't leave the page held
+              // off-centre waiting for a release that already happened.
+              if (dragFollowing) {
+                dragFollowing = false;
+                settlePageDragRef.current();
+              }
+              return;
+            }
+            const dx = stableTouchX(touch) - startX;
             const dy = touch.clientY - startY;
             const dt = Date.now() - startTime;
             const absDx = Math.abs(dx);
@@ -1146,16 +1457,34 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
               return;
             }
 
-            // Swipe detection
-            const isHorizontal = absDx > absDy * 1.5;
-            const velocity = absDx / Math.max(dt, 1);
-            const isFlick = velocity > 0.5 && absDx > 60;
-            const isDrag = absDx > 100 && dt < 600;
+            // Swipe detection. A drag the page actually followed is judged
+            // without the duration cap — it was visibly tracked the whole way.
+            const wasFollowing = dragFollowing;
+            dragFollowing = false;
+            const commit = isHorizontalSwipe(dx, dy) && (wasFollowing
+              ? shouldCommitFollowSwipe(dx, dt)
+              : shouldCommitSwipe(dx, dt));
 
-            if (isHorizontal && (isFlick || isDrag)) {
-              if (dx < 0) nextPageRef.current();
-              else prevPageRef.current();
+            if (!commit) {
+              if (wasFollowing) settlePageDragRef.current();
+              return;
             }
+
+            if (wasFollowing) {
+              releasePageDragWithTurnRef.current(dx < 0 ? 1 : -1);
+            } else if (dx < 0) {
+              nextPageRef.current();
+            } else {
+              prevPageRef.current();
+            }
+          });
+
+          // The OS taking over (e.g. a system edge gesture) is not a release,
+          // so the page falls back rather than turning.
+          doc.addEventListener('touchcancel', () => {
+            if (!dragFollowing) return;
+            dragFollowing = false;
+            settlePageDragRef.current();
           });
 
           // Forward trackpad/mouse wheel events for gesture handling (page turns).
@@ -1163,22 +1492,56 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
           // iframes cannot each independently trigger a page turn on one gesture.
           doc.addEventListener('wheel', (e: WheelEvent) => {
             if (e.ctrlKey || e.metaKey) return;
-            if (sharedWheelCooldown) { sharedWheelAccX = 0; return; }
-            if (Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.8 && Math.abs(e.deltaX) > 2) {
-              e.preventDefault();
-              sharedWheelAccX += e.deltaX;
-              if (sharedWheelTimer) clearTimeout(sharedWheelTimer);
-              sharedWheelTimer = setTimeout(() => { sharedWheelAccX = 0; }, 400);
-              const threshold = 150;
-              if (sharedWheelAccX > threshold) {
-                sharedWheelAccX = 0; sharedWheelCooldown = true;
-                nextPageRef.current();
-                setTimeout(() => { sharedWheelCooldown = false; sharedWheelAccX = 0; }, 1000);
-              } else if (sharedWheelAccX < -threshold) {
-                sharedWheelAccX = 0; sharedWheelCooldown = true;
-                prevPageRef.current();
-                setTimeout(() => { sharedWheelCooldown = false; sharedWheelAccX = 0; }, 1000);
+            if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 0.8 || Math.abs(e.deltaX) <= 2) return;
+            e.preventDefault();
+
+            // Still swallowing the tail of a gesture that already turned.
+            if (sharedWheelCooldown) {
+              holdSharedWheelUntilQuiet();
+              return;
+            }
+
+            if (sharedWheelStart === 0) sharedWheelStart = performance.now();
+            // deltaX is positive scrolling right, which advances the page.
+            // Negate it so it reads as finger travel, like the touch path.
+            sharedWheelAccX -= e.deltaX;
+
+            // The accumulated-distance rule below is only for readers that
+            // cannot show a live drag at all. Reaching it because a drag is
+            // merely busy would let one gesture commit twice: once on release
+            // and again the moment the accumulator crossed the threshold.
+            if (!einkModeRef.current) {
+              if (!setPageDragRef.current(sharedWheelAccX)) {
+                // The previous turn is still playing out.
+                holdSharedWheelUntilQuiet();
+                return;
               }
+
+              // A trackpad has no touch-end, so the page settles once events
+              // stop arriving — that quiet period is the release.
+              armSharedWheelEnd(() => {
+                const dx = sharedWheelAccX;
+                const duration = performance.now() - sharedWheelStart;
+                resetSharedWheel();
+                if (!shouldCommitFollowSwipe(dx, duration)) {
+                  settlePageDragRef.current();
+                  return;
+                }
+                releasePageDragWithTurnRef.current(dx < 0 ? 1 : -1);
+                holdSharedWheelUntilQuiet();
+              });
+              return;
+            }
+
+            // E-ink: no live preview, so turn on accumulated distance instead.
+            armSharedWheelEnd(resetSharedWheel);
+            const threshold = 150;
+            if (sharedWheelAccX < -threshold) {
+              nextPageRef.current();
+              holdSharedWheelUntilQuiet();
+            } else if (sharedWheelAccX > threshold) {
+              prevPageRef.current();
+              holdSharedWheelUntilQuiet();
             }
           }, { passive: false });
 
@@ -1717,7 +2080,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         onClick={gestures.handleContentClick}
       >
         {/* Animated wrapper around the epub viewer */}
-        <div className="w-full h-full" style={pageStyle}>
+        <div ref={pageSurfaceRef} className="w-full h-full" style={pageStyle}>
           <div
             ref={viewerRef}
             className="w-full h-full"

@@ -7,7 +7,7 @@
  * Mobile: Full-screen overlay with fixed header and back button
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { cn, stripHtml } from '@/lib/utils';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
@@ -35,16 +35,17 @@ import { getEpubReaderTheme } from '@/lib/epub-reader-themes';
 import type { EpubReaderTheme } from '@/lib/epub-reader-themes';
 import { einkPower } from '@/services/eink-power';
 import { getTapZoneAction } from '@/components/reader/tap-zones';
+import {
+  SWIPE_AXIS_LOCK_PX,
+  SWIPE_COMMIT_DISTANCE_PX,
+  isHorizontalSwipe,
+  shouldCommitSwipe,
+} from '@/components/reader/swipe-follow';
 
 const EINK_INTERACTION_SETTLE_MS = 180;
-const PAGINATION_TOUCH_COMMIT_THRESHOLD_PX = 96;
-const PAGINATION_FLICK_MIN_DISTANCE_PX = 60;
-const PAGINATION_FLICK_MIN_VELOCITY = 0.5;
-const PAGINATION_SWIPE_MAX_DURATION_MS = 600;
 const PAGINATION_TAP_MAX_DISTANCE_PX = 10;
 const EINK_PAGINATED_TOUCH_RECOVERY_MS = 700;
 const PAGINATION_TAP_MAX_DURATION_MS = 250;
-const PAGINATION_DIRECTION_LOCK_DISTANCE_PX = 8;
 const SYNTHETIC_CLICK_SUPPRESS_MS = 350;
 const LEFT_EDGE_DISMISS_WIDTH_PX = 30;
 
@@ -378,6 +379,10 @@ export function ArticleReader({
     active: false,
     handled: false,
     axisLocked: null as 'horizontal' | 'vertical' | null,
+    // How this gesture moves the page, decided once the axis locks horizontal:
+    // 'follow' drags the content under the finger, 'threshold' turns the page
+    // once the travel passes a distance (the E-ink / single-page fallback).
+    dragMode: 'undecided' as 'undecided' | 'follow' | 'threshold',
   });
   const suppressSyntheticClickUntilRef = useRef(0);
 
@@ -389,6 +394,10 @@ export function ArticleReader({
     cancelPaginatedReady,
     handlePrevPage,
     handleNextPage,
+    beginPageDrag,
+    movePageDrag,
+    endPageDrag,
+    cancelPageDrag,
     paginatedArticleStyle,
     schedulePaginatedReady,
     trailingBlankColumns,
@@ -403,7 +412,15 @@ export function ArticleReader({
     measureDeps: [isLoadingReader, isReaderView, readerContent, showComments, showTypography, modal, isOverlayReaderLayout, isLandscape],
   });
 
-  usePaginationWheel(scrollRef, handleNextPage, handlePrevPage, isPaginated);
+  // The trackpad drags the page like a finger and settles when the gesture
+  // goes quiet; beginPageDrag declining (E-ink) falls back to threshold turns.
+  const wheelFollow = useMemo(() => ({
+    begin: beginPageDrag,
+    move: movePageDrag,
+    end: endPageDrag,
+  }), [beginPageDrag, endPageDrag, movePageDrag]);
+
+  usePaginationWheel(scrollRef, handleNextPage, handlePrevPage, isPaginated, { follow: wheelFollow });
   useReaderWakeHandlers(handleNextPage, handlePrevPage, isPaginated);
 
   useReaderKeyboard({
@@ -608,6 +625,7 @@ export function ArticleReader({
         active: true,
         handled: false,
         axisLocked: null,
+        dragMode: 'undecided',
       };
       return;
     }
@@ -643,18 +661,29 @@ export function ArticleReader({
       const dy = touch.clientY - touchState.startY;
 
       if (touchState.axisLocked === null) {
-        if (Math.abs(dx) < PAGINATION_DIRECTION_LOCK_DISTANCE_PX && Math.abs(dy) < PAGINATION_DIRECTION_LOCK_DISTANCE_PX) {
+        if (Math.abs(dx) < SWIPE_AXIS_LOCK_PX && Math.abs(dy) < SWIPE_AXIS_LOCK_PX) {
           return;
         }
 
-        touchState.axisLocked = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'horizontal' : 'vertical';
+        touchState.axisLocked = isHorizontalSwipe(dx, dy) ? 'horizontal' : 'vertical';
       }
 
       if (touchState.axisLocked !== 'horizontal') return;
 
       e.preventDefault();
 
-      if (Math.abs(dx) < PAGINATION_TOUCH_COMMIT_THRESHOLD_PX) {
+      if (touchState.dragMode === 'undecided') {
+        // Prefer dragging the page under the finger; fall back to a discrete
+        // turn where that is not possible (E-ink, single-page articles).
+        touchState.dragMode = beginPageDrag() ? 'follow' : 'threshold';
+      }
+
+      if (touchState.dragMode === 'follow') {
+        movePageDrag(dx);
+        return;
+      }
+
+      if (Math.abs(dx) < SWIPE_COMMIT_DISTANCE_PX) {
         return;
       }
 
@@ -707,7 +736,7 @@ export function ArticleReader({
       const distance = Math.min(dx, 200);
       setPullDismiss(distance > 0 ? distance / 150 : 0);
     }
-  }, [handleNextPage, handlePrevPage, isPaginated, scrollRef]);
+  }, [beginPageDrag, handleNextPage, handlePrevPage, isPaginated, movePageDrag, scrollRef]);
 
   const handleArticleTouchEnd = useCallback((e: React.TouchEvent<HTMLElement>) => {
     if (isPaginated) {
@@ -715,10 +744,12 @@ export function ArticleReader({
       if (!touchState.active && !touchState.handled) return;
 
       const wasHandled = touchState.handled;
+      const wasFollowing = touchState.dragMode === 'follow';
 
       touchState.active = false;
       touchState.handled = false;
       touchState.axisLocked = null;
+      touchState.dragMode = 'undecided';
 
       if (wasHandled) {
         return;
@@ -732,12 +763,16 @@ export function ArticleReader({
       const duration = Date.now() - touchState.startTime;
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
-      const isHorizontal = absDx > absDy * 1.5;
-      const velocity = absDx / Math.max(duration, 1);
-      const isFlick = velocity > PAGINATION_FLICK_MIN_VELOCITY && absDx > PAGINATION_FLICK_MIN_DISTANCE_PX;
-      const isDrag = absDx > PAGINATION_TOUCH_COMMIT_THRESHOLD_PX && duration < PAGINATION_SWIPE_MAX_DURATION_MS;
 
-      if (isHorizontal && (isFlick || isDrag)) {
+      // The page has been tracking the finger, so the only thing left is to
+      // settle onto whichever page it is now nearest (or the next one, on a flick).
+      if (wasFollowing) {
+        suppressSyntheticClickUntilRef.current = Date.now() + SYNTHETIC_CLICK_SUPPRESS_MS;
+        endPageDrag(dx, duration);
+        return;
+      }
+
+      if (isHorizontalSwipe(dx, dy) && shouldCommitSwipe(dx, duration)) {
         suppressSyntheticClickUntilRef.current = Date.now() + SYNTHETIC_CLICK_SUPPRESS_MS;
         if (dx < 0) {
           handleNextPage();
@@ -770,7 +805,24 @@ export function ArticleReader({
     }
     setPullDismiss(0);
     setDismissDir(null);
-}, [handleNextPage, handlePaginatedTap, handlePrevPage, isPaginated, onClose, pullDismiss]);
+}, [endPageDrag, handleNextPage, handlePaginatedTap, handlePrevPage, isPaginated, onClose, pullDismiss]);
+
+  /**
+   * A cancelled touch (the OS taking over, e.g. a system edge gesture) is not a
+   * release, so the page falls back to where the drag began rather than turning.
+   */
+  const handleArticleTouchCancel = useCallback((e: React.TouchEvent<HTMLElement>) => {
+    const touchState = paginatedTouchRef.current;
+    if (isPaginated && touchState.dragMode === 'follow') {
+      touchState.active = false;
+      touchState.handled = false;
+      touchState.axisLocked = null;
+      touchState.dragMode = 'undecided';
+      cancelPageDrag();
+      return;
+    }
+    handleArticleTouchEnd(e);
+  }, [cancelPageDrag, handleArticleTouchEnd, isPaginated]);
 
   const handleArticleClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
     if (!isPaginated) return;
@@ -918,7 +970,7 @@ export function ArticleReader({
             onTouchStart={handleArticleTouchStart}
             onTouchMove={handleArticleTouchMove}
             onTouchEnd={handleArticleTouchEnd}
-            onTouchCancel={handleArticleTouchEnd}
+            onTouchCancel={handleArticleTouchCancel}
             onClick={handleArticleClick}
             style={isPaginated
               ? paginatedArticleStyle
@@ -1143,7 +1195,7 @@ export function ArticleReader({
                 onTouchStart={handleArticleTouchStart}
                 onTouchMove={handleArticleTouchMove}
                 onTouchEnd={handleArticleTouchEnd}
-                onTouchCancel={handleArticleTouchEnd}
+                onTouchCancel={handleArticleTouchCancel}
                 onClick={handleArticleClick}
               >
                 <ArticleContent
@@ -1313,7 +1365,7 @@ export function ArticleReader({
             onTouchStart={handleArticleTouchStart}
             onTouchMove={handleArticleTouchMove}
             onTouchEnd={handleArticleTouchEnd}
-            onTouchCancel={handleArticleTouchEnd}
+            onTouchCancel={handleArticleTouchCancel}
             onClick={handleArticleClick}
           >
             <ArticleContent 

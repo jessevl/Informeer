@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getTapZoneAction } from './tap-zones';
+import { SWIPE_FOLLOW_DAMPING, SWIPE_FOLLOW_EDGE_DAMPING } from './swipe-follow';
 
 export interface ReaderGestureCallbacks {
   nextPage: () => void;
@@ -339,7 +340,7 @@ export function useReaderGestures(
       if (enableSwipePreview && Math.abs(dx) > Math.abs(dy) * 1.2 && Math.abs(dx) > 10) {
         const { canGoNext, canGoPrev } = callbacksRef.current;
         const atEdge = (dx > 0 && !canGoPrev) || (dx < 0 && !canGoNext);
-        setSwipeOffset(atEdge ? dx * 0.2 : dx * 0.4);
+        setSwipeOffset(dx * (atEdge ? SWIPE_FOLLOW_EDGE_DAMPING : SWIPE_FOLLOW_DAMPING));
       } else if (!enableSwipePreview && swipeOffset !== 0) {
         setSwipeOffset(0);
       }
