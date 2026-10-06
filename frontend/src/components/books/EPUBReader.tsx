@@ -761,10 +761,26 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   canGoPrevRef.current = canGoPrev;
 
   // ─── Follow-the-finger page drag ───────────────────────────────
-  // The epub renders in an iframe we cannot slice into page halves, so a drag
-  // translates the whole page surface. Writes go straight to the DOM rather
-  // than through state: a swipe produces a touchmove per frame, and this
-  // component is far too heavy to re-render at that rate.
+  // Two ways to move the page, picked per gesture:
+  //
+  // - 'scroll' drags epubjs's own pagination container, which reveals the
+  //   real neighbouring page. Preferred, and used for almost every turn.
+  // - 'translate' slides the whole page surface over the page colour. Used
+  //   where there is no neighbour to reveal — the first/last page of a
+  //   chapter, single-page chapters, and RTL books.
+  //
+  // Either way the writes go straight to the DOM rather than through state:
+  // a swipe produces a touchmove per frame, and this component is far too
+  // heavy to re-render at that rate.
+  type PageDragMode = 'none' | 'scroll' | 'translate';
+  const pageDragModeRef = useRef<PageDragMode>('none');
+  const scrollDragRef = useRef<{
+    container: HTMLElement;
+    startLeft: number;
+    maxLeft: number;
+    delta: number;
+  } | null>(null);
+  const scrollDragRafRef = useRef<number | null>(null);
   const pageSurfaceRef = useRef<HTMLDivElement>(null);
   const pageDragSettleTimerRef = useRef<number | null>(null);
   const pageDragExitTimerRef = useRef<number | null>(null);
@@ -773,10 +789,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   /** Set while the page is held off-screen waiting for the new content. */
   const pageDragEnterPendingRef = useRef(false);
   /**
-   * Translation currently applied to the page surface.
+   * How far the content has moved from where this gesture started.
    *
    * Touch coordinates arrive from inside the epub iframe, so they are measured
-   * against the iframe's own viewport — which this transform moves. Holding a
+   * against the iframe's own viewport — which both drag modes move. Holding a
    * finger still therefore makes `clientX` drift by exactly `-offset`, and
    * feeding that back in oscillated the page every frame. Handlers add this
    * back to recover the finger's true travel. See `stableTouchX`.
@@ -799,11 +815,70 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   }, []);
 
   /**
-   * Track the pointer. Returns false when the reader will not drag — on E-ink,
-   * which cannot repaint fast enough to follow a finger, or mid page-turn — so
-   * callers can fall back to a discrete turn.
+   * epubjs's pagination container, when it can serve a peek.
+   *
+   * With `flow: 'paginated'` the whole chapter is laid out as CSS columns
+   * inside one iframe, and a page turn is just
+   * `container.scrollLeft += layout.delta` — so the neighbouring pages are
+   * already rendered, merely scrolled out of view. Scrolling the container
+   * ourselves reveals them. epubjs listens to that same container's scroll
+   * event and reports the new location 20ms after the motion stops, so it
+   * keeps its own position without being told anything.
    */
-  const setPageDrag = useCallback((dx: number) => {
+  const getScrollPeekTarget = useCallback(() => {
+    const manager = (renditionRef.current as any)?.manager;
+    const container = manager?.container as HTMLElement | undefined;
+    const delta = manager?.layout?.delta as number | undefined;
+    if (!manager || !container || !delta || delta <= 0) return null;
+    // epubjs scrolls RTL books with negative offsets; leave those to the
+    // translate path rather than reimplementing its sign handling.
+    if (manager.settings?.direction === 'rtl') return null;
+    const maxLeft = container.scrollWidth - container.clientWidth;
+    // A chapter that fits on one page has no neighbour to reveal.
+    if (maxLeft <= 1) return null;
+    return { container, startLeft: container.scrollLeft, maxLeft, delta };
+  }, []);
+
+  /** Ease the pagination container to an exact offset. */
+  const animateContainerScroll = useCallback((
+    container: HTMLElement,
+    target: number,
+    durationMs: number,
+    onDone: () => void,
+  ) => {
+    if (scrollDragRafRef.current !== null) {
+      cancelAnimationFrame(scrollDragRafRef.current);
+      scrollDragRafRef.current = null;
+    }
+    const from = container.scrollLeft;
+    const distance = target - from;
+    if (Math.abs(distance) < 1) {
+      container.scrollLeft = target;
+      onDone();
+      return;
+    }
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min((now - startedAt) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      container.scrollLeft = from + distance * eased;
+      if (progress < 1) {
+        scrollDragRafRef.current = requestAnimationFrame(step);
+        return;
+      }
+      container.scrollLeft = target;
+      scrollDragRafRef.current = null;
+      onDone();
+    };
+    scrollDragRafRef.current = requestAnimationFrame(step);
+  }, []);
+
+  /**
+   * Claim the page for a drag, choosing how it will move. Returns false when
+   * the reader will not drag at all — on E-ink, which cannot repaint fast
+   * enough to follow a finger, or while a previous turn is still playing out.
+   */
+  const beginPageDrag = useCallback(() => {
     if (einkModeRef.current || isAnimatingRef.current) return false;
     // A previously released drag is still playing out its turn. Let it finish
     // rather than measure a new gesture against a surface that is mid-animation
@@ -814,6 +889,43 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       || pageDragEnterTimerRef.current !== null
       || pageDragEnterPendingRef.current
     ) return false;
+
+    const peek = getScrollPeekTarget();
+    if (peek) {
+      scrollDragRef.current = peek;
+      pageDragModeRef.current = 'scroll';
+      return true;
+    }
+    if (!pageSurfaceRef.current) return false;
+    pageDragModeRef.current = 'translate';
+    return true;
+  }, [getScrollPeekTarget]);
+
+  /**
+   * Track the pointer. Returns false when the reader will not drag, so callers
+   * can fall back to a discrete turn.
+   */
+  const setPageDrag = useCallback((dx: number) => {
+    if (pageDragModeRef.current === 'none' && !beginPageDrag()) return false;
+
+    if (pageDragModeRef.current === 'scroll') {
+      const drag = scrollDragRef.current;
+      if (!drag) return false;
+      // epubjs reports a location 20ms after scrolling stops, so pausing
+      // mid-drag lands one at a half-turned position. Keep the user-navigation
+      // window alive for the whole gesture so the anchor-restore watchdog reads
+      // that as deliberate rather than drift and pulls the reader back a page.
+      markUserNavigationRef.current();
+      // The real neighbouring page comes with it. The ends stop hard: there
+      // is nothing beyond this chapter in the container to scroll into.
+      const next = Math.max(0, Math.min(drag.maxLeft, drag.startLeft - dx));
+      drag.container.scrollLeft = next;
+      // Scrolling right by N moves the content left by N, which is what the
+      // touch coordinates have to be corrected by.
+      pageDragAppliedRef.current = drag.startLeft - next;
+      return true;
+    }
+
     const el = pageSurfaceRef.current;
     if (!el) return false;
     // 1:1 with the pointer, so the page stays stuck to the finger exactly as it
@@ -830,7 +942,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     const limit = window.innerWidth;
     writePageDrag(Math.max(-limit, Math.min(limit, offset)));
     return true;
-  }, [writePageDrag]);
+  }, [beginPageDrag, writePageDrag]);
 
   /** Strip the live transform, handing the element back to React. */
   const clearPageDrag = useCallback(() => {
@@ -848,6 +960,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   /** Ease the page back to rest after a drag that did not turn it. */
   const settlePageDrag = useCallback(() => {
+    if (pageDragModeRef.current === 'scroll') {
+      const drag = scrollDragRef.current;
+      pageDragModeRef.current = 'none';
+      scrollDragRef.current = null;
+      if (!drag) return;
+      animateContainerScroll(drag.container, drag.startLeft, SWIPE_SETTLE_MS, () => {
+        pageDragAppliedRef.current = 0;
+      });
+      return;
+    }
+    pageDragModeRef.current = 'none';
     const el = pageSurfaceRef.current;
     if (!el) { clearPageDrag(); return; }
     pageDragAppliedRef.current = 0;
@@ -863,9 +986,13 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       current.style.transform = '';
       current.style.transition = '';
     }, SWIPE_SETTLE_MS);
-  }, [clearPageDrag]);
+  }, [animateContainerScroll, clearPageDrag]);
 
   const clearPageDragTimers = useCallback(() => {
+    if (scrollDragRafRef.current !== null) {
+      cancelAnimationFrame(scrollDragRafRef.current);
+      scrollDragRafRef.current = null;
+    }
     for (const ref of [pageDragSettleTimerRef, pageDragExitTimerRef, pageDragEnterTimerRef, pageDragTurnTimeoutRef]) {
       if (ref.current !== null) {
         clearTimeout(ref.current);
@@ -929,6 +1056,43 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
    * rather than animate.
    */
   const releasePageDragWithTurn = useCallback((direction: 1 | -1) => {
+    if (pageDragModeRef.current === 'scroll') {
+      const drag = scrollDragRef.current;
+      pageDragModeRef.current = 'none';
+      scrollDragRef.current = null;
+      if (!drag) return;
+
+      // Is the page being turned to inside this chapter's own columns?
+      const hasNeighbour = direction === 1
+        ? drag.startLeft + drag.delta <= drag.maxLeft + 1
+        : drag.startLeft >= drag.delta - 1;
+
+      if (!hasNeighbour) {
+        // Next chapter: not in the container, so epubjs has to load it. The
+        // drag could not have moved in this direction, so there is nothing to
+        // unwind first.
+        pageDragAppliedRef.current = 0;
+        (direction === 1 ? nextPageRef.current : prevPageRef.current)();
+        return;
+      }
+
+      // Claim the coming relocation as user navigation, or the anchor-restore
+      // watchdog treats it as drift and pulls the reader back a page.
+      markUserNavigationRef.current();
+
+      const target = drag.startLeft + direction * drag.delta;
+      const remaining = Math.abs(target - drag.container.scrollLeft);
+      const scrollMs = Math.max(
+        PAGE_DRAG_EXIT_MIN_MS,
+        Math.round(PAGE_DRAG_EXIT_MS * Math.min(1, remaining / Math.max(drag.delta, 1))),
+      );
+      animateContainerScroll(drag.container, target, scrollMs, () => {
+        pageDragAppliedRef.current = 0;
+      });
+      return;
+    }
+
+    pageDragModeRef.current = 'none';
     const el = pageSurfaceRef.current;
     const canTurn = direction === 1 ? canGoNextRef.current : canGoPrevRef.current;
     const turn = direction === 1 ? nextPageInstantRef.current : prevPageInstantRef.current;
@@ -970,9 +1134,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
         settlePageDrag();
       }, PAGE_DRAG_TURN_TIMEOUT_MS);
     }, exitMs);
-  }, [clearPageDragTimers, settlePageDrag]);
+  }, [animateContainerScroll, clearPageDragTimers, settlePageDrag]);
 
   useEffect(() => () => {
+    if (scrollDragRafRef.current !== null) cancelAnimationFrame(scrollDragRafRef.current);
     for (const ref of [pageDragSettleTimerRef, pageDragExitTimerRef, pageDragEnterTimerRef, pageDragTurnTimeoutRef]) {
       if (ref.current !== null) clearTimeout(ref.current);
     }
@@ -1402,6 +1567,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
               startTime = Date.now();
               touchMoved = false;
               dragFollowing = false;
+              // Releases clear this themselves; resetting here keeps a gesture
+              // that never got a touchend from handing stale scroll bounds to
+              // the next one.
+              pageDragModeRef.current = 'none';
             }
           }, { passive: true });
 
