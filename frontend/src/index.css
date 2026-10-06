@@ -594,3 +594,15 @@ html.theme-eink .accent-swatch[data-selected='true'] span {
   border: 1px solid var(--color-border-default);
   box-shadow: none;
 }
+
+/* Links on a page that carries its own colour scheme take the scheme's link
+   colour. `.prose a` reaches for the accent tokens, but those belong to the
+   accent chosen in settings and are used for UI chrome, so the scheme supplies
+   the link tokens instead and they are read here. */
+.reader-page-surface .prose a {
+  color: var(--color-text-link);
+}
+
+.reader-page-surface .prose a:hover {
+  color: var(--color-text-link-hover);
+}

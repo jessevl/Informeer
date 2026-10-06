@@ -57,11 +57,13 @@ export function getReaderSurfaceVars(theme: EpubReaderTheme): CSSProperties {
     '--color-border-subtle': ink(10),
     '--color-border-emphasis': ink(28),
 
-    '--color-accent-primary': link,
-    '--color-accent-fg': link,
-    '--color-accent-emphasis': link,
-    '--color-accent-muted': ink(10),
-    '--color-accent-subtle': ink(6),
+    // The accent tokens are deliberately left alone. They carry the accent
+    // colour chosen in settings and drive UI chrome — the reading progress bar,
+    // active toolbar buttons, focus rings — none of which belong to the page.
+    // A scheme only owns the page itself, so its link colour goes to the link
+    // tokens and reaches the prose through a `.reader-page-surface` rule in
+    // index.css. Routing it through the accent tokens instead turned every
+    // accented control in the reader the scheme's shade of blue.
   };
 
   return vars as CSSProperties;
