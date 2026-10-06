@@ -59,7 +59,6 @@ import { useOfflineRegistry } from '@/stores/offline';
 import { useConnectivityStore } from '@/stores/connectivity';
 import { EPUB_FONT_FACE_CSS, getEpubFontStack, normalizeEpubFontValue } from '@/lib/epub-fonts';
 import { deleteCachedEpubLocations, readCachedEpubLocations, writeCachedEpubLocations } from '@/lib/epub-locations-cache';
-import { useIsLandscapeViewport } from '@/hooks/useIsLandscapeViewport';
 import { useIsViewportAtLeast } from '@/hooks/useIsViewportAtLeast';
 import { useOverlayCloseInteraction } from '@/hooks/useOverlayCloseInteraction';
 import { einkPower } from '@/services/eink-power';
@@ -88,6 +87,9 @@ interface EPUBReaderProps {
 
 // Persist typography settings in localStorage
 const TYPOGRAPHY_KEY = 'informeer-epub-typography';
+// Whether the reader has ever chosen a column count. Until they have, columns
+// follow the viewport; afterwards their choice is honoured whenever it fits.
+const SPREAD_CHOSEN_KEY = 'informeer-epub-spread-chosen';
 function loadTypographySettings(): TypographySettings {
   try {
     const stored = localStorage.getItem(TYPOGRAPHY_KEY);
@@ -101,6 +103,18 @@ function loadTypographySettings(): TypographySettings {
     }
   } catch { /* ignore */ }
   return DEFAULT_TYPOGRAPHY;
+}
+function loadSpreadChosen(): boolean {
+  try {
+    return localStorage.getItem(SPREAD_CHOSEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveSpreadChosen() {
+  try {
+    localStorage.setItem(SPREAD_CHOSEN_KEY, '1');
+  } catch { /* ignore */ }
 }
 function saveTypographySettings(settings: TypographySettings) {
   localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify(settings));
@@ -288,7 +302,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const prevAttemptInProgressRef = useRef(false);
   const currentBookDataRef = useRef<Uint8Array | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
-  const manualSpreadPreferenceRef = useRef(false);
+  // Seeded from storage so a chosen column count survives reopening the book;
+  // otherwise the auto-fit effect below overwrote it on every mount.
+  const manualSpreadPreferenceRef = useRef(loadSpreadChosen());
   const userNavAtRef = useRef(0);
   const anchorCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreGuardRef = useRef<{
@@ -340,7 +356,10 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   // --- Spread mode ---
   // The spread the reader has asked for, which outlives a fold.
-  const [isSpreadView, setIsSpreadView] = useState(false);
+  // The spread the reader has asked for, which outlives a fold.
+  const [isSpreadView, setIsSpreadView] = useState(() => (
+    loadSpreadChosen() && loadTypographySettings().columnCount === 2
+  ));
 
   // --- TOC ---
   const [showToc, setShowToc] = useState(false);
@@ -357,28 +376,24 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const recentOfflineBooksLimit = useSettingsStore(s => s.recentOfflineBooksLimit);
   const readerToolbarHideDelay = useSettingsStore(s => s.readerToolbarHideDelay);
   const offlineRegistry = useOfflineRegistry();
-  const isWindowLandscapeViewport = useIsLandscapeViewport();
-
-  // Use window orientation (not the viewer div) for spread eligibility.
-  // The viewer div shrinks by ~52px when the toolbar is visible; on near-square
-  // screens that flips isSpreadEligible, which triggers spread/theme effects that
-  // activate the restore guard every time the toolbar auto-hides — silently
-  // discarding page-turn progress for the duration of every guard window.
-  const isLandscapeViewport = isWindowLandscapeViewport;
   /**
    * Whether a spread fits at all, independent of whether one is wanted.
    *
    * minSpreadWidth is pinned to 1 to defeat epubjs's own 800px guard, so this
-   * is the only thing standing between a narrow screen and a two-column
-   * layout. Orientation cannot do the job: a book-style foldable is taller
-   * than it is wide both folded and unfolded, so it reads as portrait in
-   * either state and a spread chosen while unfolded survived the fold.
+   * is the only thing standing between a narrow screen and a two-column layout.
+   *
+   * Width, not orientation. Width subsumes it — turning a phone to landscape
+   * makes it wide enough and turning it back does not — while orientation
+   * cannot see a fold: a book-style foldable is taller than it is wide in both
+   * states, so it reads as portrait either way.
+   *
+   * Measured against the window rather than the viewer div, which shrinks by
+   * ~52px when the toolbar is visible. On near-square screens that flipped
+   * eligibility every time the toolbar auto-hid, triggering the spread/theme
+   * effects and activating the restore guard — silently discarding page-turn
+   * progress for the duration of every guard window.
    */
   const spreadFitsViewport = useIsViewportAtLeast(EPUB_MIN_SPREAD_VIEWPORT_PX);
-  // Auto-spread should follow orientation so rotating between portrait and
-  // landscape flips between single-page and spread layouts without needing the
-  // typography panel.
-  const isSpreadEligible = isLandscapeViewport && spreadFitsViewport;
 
   // Track OS preference so 'system' mode responds to changes
   const [systemIsDark, setSystemIsDark] = useState(
@@ -567,16 +582,17 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
   useEffect(() => {
     if (!manualSpreadPreferenceRef.current) {
-      const cols: 1 | 2 = isSpreadEligible ? 2 : 1;
-      setIsSpreadView(isSpreadEligible);
+      const cols: 1 | 2 = spreadFitsViewport ? 2 : 1;
+      setIsSpreadView(spreadFitsViewport);
       // Only create a new object when columnCount actually changes — a new reference
       // with the same value would trigger the theme effect and fire queueRestoreToCfi.
       setTypography(prev => prev.columnCount === cols ? prev : { ...prev, columnCount: cols });
     }
-  }, [isSpreadEligible]);
+  }, [spreadFitsViewport]);
 
-  // On E-ink, wake the device briefly on orientation change so the screen
-  // can reflow and repaint at the new orientation before re-hibernating.
+  // On E-ink, wake the device briefly when the viewport crosses the spread
+  // width — a rotation or a fold — so the screen can reflow and repaint at the
+  // new size before re-hibernating.
   // finishEinkWork(true) is triggered automatically by the relocated handler
   // after epub.js re-renders; the safety timeout covers cases where a spread
   // change is not triggered (manual spread preference).
@@ -585,7 +601,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     startEinkWork('orientation');
     const safety = setTimeout(() => { void finishEinkWork(true); }, 3000);
     return () => clearTimeout(safety);
-  }, [isSpreadEligible, einkMode, startEinkWork, finishEinkWork]);
+  }, [spreadFitsViewport, einkMode, startEinkWork, finishEinkWork]);
 
   const remoteSync = useRemoteProgressSync({
     enabled: !isLoading && locationsReady,
@@ -887,6 +903,14 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       const progress = Math.min((now - startedAt) / durationMs, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       container.scrollLeft = from + distance * eased;
+      // Restamp every frame. epubjs reports a location 20ms after scrolling
+      // stops, and a single dropped frame opens a longer gap than that, so it
+      // reports mid-animation — while the previous page is still the visible
+      // start. The relocated handler consumes the user-navigation flag on that
+      // intermediate report, which left the final one unflagged, the reading
+      // anchor stuck on the previous page, and any later restore jumping back
+      // to it. Restamping keeps every report in this animation flagged.
+      markUserNavigationRef.current();
       if (progress < 1) {
         scrollDragRafRef.current = requestAnimationFrame(step);
         return;
@@ -1332,7 +1356,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
         // isSpreadView may not have caught up with the auto decision on the
         // first render, so fall back to eligibility until it has.
-        const wantSpread = (manualSpreadPreferenceRef.current ? isSpreadView : isSpreadEligible)
+        // Until the reader has chosen, columns follow the viewport; isSpreadView
+        // may not have caught that up on the very first render.
+        const wantSpread = (manualSpreadPreferenceRef.current ? isSpreadView : true)
           && spreadFitsViewport;
         const rendition = epub.renderTo(viewerEl, {
           width: '100%',
@@ -1955,6 +1981,7 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   const handleTypographyChange = useCallback((newSettings: TypographySettings) => {
     if (newSettings.columnCount !== typography.columnCount) {
       manualSpreadPreferenceRef.current = true;
+      saveSpreadChosen();
       setIsSpreadView(newSettings.columnCount === 2);
     }
     setTypography(newSettings);
