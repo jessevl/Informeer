@@ -769,6 +769,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
   //   where there is no neighbour to reveal — the first/last page of a
   //   chapter, single-page chapters, and RTL books.
   //
+  // Neither mode reads layout per move: the scroll bounds and the translate
+  // clamp are both measured once, when the gesture claims the page.
+  //
   // Either way the writes go straight to the DOM rather than through state:
   // a swipe produces a touchmove per frame, and this component is far too
   // heavy to re-render at that rate.
@@ -781,6 +784,8 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     delta: number;
   } | null>(null);
   const scrollDragRafRef = useRef<number | null>(null);
+  /** Translate-mode clamp, measured once per gesture rather than per move. */
+  const translateLimitRef = useRef(0);
   const pageSurfaceRef = useRef<HTMLDivElement>(null);
   const pageDragSettleTimerRef = useRef<number | null>(null);
   const pageDragExitTimerRef = useRef<number | null>(null);
@@ -810,7 +815,9 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
     const el = pageSurfaceRef.current;
     if (!el) return;
     pageDragAppliedRef.current = offset;
-    el.style.transition = 'none';
+    // Only the transform changes per move; rewriting the same transition on
+    // every frame just dirties style for nothing.
+    if (el.style.transition !== 'none') el.style.transition = 'none';
     el.style.transform = `translateX(${offset}px)`;
   }, []);
 
@@ -896,7 +903,11 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
       pageDragModeRef.current = 'scroll';
       return true;
     }
-    if (!pageSurfaceRef.current) return false;
+    const el = pageSurfaceRef.current;
+    if (!el) return false;
+    // Reading a viewport width can flush layout, so take it once here
+    // instead of on every move.
+    translateLimitRef.current = el.clientWidth || window.innerWidth;
     pageDragModeRef.current = 'translate';
     return true;
   }, [getScrollPeekTarget]);
@@ -928,18 +939,16 @@ export function EPUBReader({ book, onClose }: EPUBReaderProps) {
 
     const el = pageSurfaceRef.current;
     if (!el) return false;
-    // 1:1 with the pointer, so the page stays stuck to the finger exactly as it
-    // does in the article reader. What trails in behind it is the page colour
-    // rather than the next page's text — epubjs renders one page per iframe and
-    // gives us no way to paint the neighbour alongside it — but tracking the
-    // finger matters more than what fills the gutter.
+    // 1:1 with the pointer, trailing the page colour in behind it. This mode
+    // only runs where there is no neighbouring page to reveal, so there is
+    // nothing better to show in the gutter.
     // Past the first/last page there is nothing to turn to, so the page resists.
     const atEdge = (dx > 0 && !canGoPrevRef.current) || (dx < 0 && !canGoNextRef.current);
     const offset = atEdge ? dx * SWIPE_FOLLOW_EDGE_DAMPING : dx;
     // Never travel more than one page away. A finger rarely gets that far, but a
     // trackpad flick's momentum tail keeps accumulating after the fingers lift
     // and would otherwise sling the page off into blank space before committing.
-    const limit = window.innerWidth;
+    const limit = translateLimitRef.current;
     writePageDrag(Math.max(-limit, Math.min(limit, offset)));
     return true;
   }, [beginPageDrag, writePageDrag]);
